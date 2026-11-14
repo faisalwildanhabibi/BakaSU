@@ -10,6 +10,10 @@
 #include <linux/ptrace.h>
 #include <asm/current.h>
 
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs.h>
+#endif
+
 #include "arch.h"
 #include "ksu.h"
 #include "klog.h"

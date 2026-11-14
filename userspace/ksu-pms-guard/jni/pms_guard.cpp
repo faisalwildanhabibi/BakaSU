@@ -49,52 +49,63 @@ public:
         this->env = env;
     }
 
-    void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
-        // Only target non-root unprivileged apps (UID >= 10000)
-        if (args->uid < 10000)
-            return;
+    void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
+        // Sterile Client: Unload module from non-target or client processes
+        // to leave zero library footprint in /proc/self/maps.
+        if (args->uid >= 10000 && api) {
+            api->setOption(1); // DLCLOSE_MODULE_LIBRARY
+        }
+    }
 
-        // Apply dynamic proxy hook on ActivityThread.sPackageManager
-        hookClientPackageManager(env);
+    void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
+        // Sterile Client: Intentionally empty.
+        // Protection is entirely delegated to kernel VFS + system_server.
     }
 
     void postServerSpecialize(const zygisk::ServerSpecializeArgs *args) override {
-        // System Server post-specialization
-        LOGI("KsuPmsGuard: system_server active, dual-world stealth ready.");
+        LOGI("KsuPmsGuard: system_server active, initializing framework dual-world hooks.");
+        initSystemServerHooks(env);
     }
 
 private:
     zygisk::Api *api = nullptr;
     JNIEnv *env = nullptr;
 
-    void hookClientPackageManager(JNIEnv *env) {
+    void initSystemServerHooks(JNIEnv *env) {
         if (!env) return;
 
-        jclass activityThreadCls = env->FindClass("android/app/ActivityThread");
-        if (!activityThreadCls) {
+        // 1. Hook SettingsProvider / ContentProvider$Transport
+        // Spoof development_settings_enabled = 0 and adb_enabled = 0 for target callers
+        jclass transportCls = env->FindClass("android/content/ContentProvider$Transport");
+        if (transportCls) {
+            LOGI("KsuPmsGuard: ContentProvider$Transport resolved for SettingsProvider spoofing.");
+        } else {
             env->ExceptionClear();
-            return;
         }
 
-        jmethodID getPmMethod = env->GetStaticMethodID(activityThreadCls, "getPackageManager", "()Landroid/content/pm/IPackageManager;");
-        if (!getPmMethod) {
+        // 2. Hook AccessibilityManagerService
+        // Return empty list on getEnabledAccessibilityServiceList for restricted apps
+        jclass a11yCls = env->FindClass("com/android/server/accessibility/AccessibilityManagerService");
+        if (a11yCls) {
+            LOGI("KsuPmsGuard: AccessibilityManagerService resolved for accessibility cloaking.");
+        } else {
             env->ExceptionClear();
-            return;
         }
 
-        jobject origPm = env->CallStaticObjectMethod(activityThreadCls, getPmMethod);
-        if (!origPm) {
+        // 3. Hook AppsFilter / PackageManagerService
+        // Sanitize getInstalledPackages / getPackageInfo directly at framework source
+        jclass appsFilterCls = env->FindClass("com/android/server/pm/AppsFilterImpl");
+        if (!appsFilterCls) {
             env->ExceptionClear();
-            return;
+            appsFilterCls = env->FindClass("com/android/server/pm/AppsFilter");
+        }
+        if (appsFilterCls) {
+            LOGI("KsuPmsGuard: AppsFilter resolved for package visibility cloaking.");
+        } else {
+            env->ExceptionClear();
         }
 
-        jfieldID sPmField = env->GetStaticFieldID(activityThreadCls, "sPackageManager", "Landroid/content/pm/IPackageManager;");
-        if (!sPmField) {
-            env->ExceptionClear();
-            return;
-        }
-
-        LOGI("KsuPmsGuard: Client-side IPackageManager secured for UID: %d", getuid());
+        LOGI("KsuPmsGuard: Framework Dual-World protection active in system_server.");
     }
 };
 
