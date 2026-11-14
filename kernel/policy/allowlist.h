@@ -43,6 +43,9 @@ void ksu_persistent_allow_list();
 struct app_profile *ksu_get_app_profile(uid_t uid);
 // only used to put the app_profile returned by ksu_get_app_profile
 void ksu_put_app_profile(struct app_profile *);
+
+bool ksu_is_allowlist_package(const char *pkg);
+bool ksu_is_allowlist_package_in_path(const char *path);
 int ksu_set_app_profile(struct app_profile *);
 
 bool ksu_uid_should_umount(uid_t uid);

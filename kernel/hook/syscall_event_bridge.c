@@ -22,6 +22,7 @@
 #include "hook/syscall_hook.h"
 #include "hook/syscall_event_bridge.h"
 #include "feature/adb_root.h"
+#include "feature/vfs_hide.h"
 #include "preinit/preinit.h"
 
 #include "compat/kernel_compat.h"
@@ -57,6 +58,12 @@ static int ksu_handle_init_mark_tracker(const char __user **filename_user)
 
 long __nocfi ksu_hook_newfstatat(int orig_nr, const struct pt_regs *regs)
 {
+    if (ksu_vfs_hide_enabled) {
+        long hide_ret = ksu_handle_stat_vfs_hide(orig_nr, (struct pt_regs *)regs);
+        if (hide_ret == -ENOENT)
+            return -ENOENT;
+    }
+
     if (!static_branch_unlikely(&ksu_su_compat_enabled))
         return ksu_call_syscall(orig_nr, regs);
 
@@ -65,10 +72,27 @@ long __nocfi ksu_hook_newfstatat(int orig_nr, const struct pt_regs *regs)
 
 long __nocfi ksu_hook_faccessat(int orig_nr, const struct pt_regs *regs)
 {
+    if (ksu_vfs_hide_enabled) {
+        long hide_ret = ksu_handle_faccessat_vfs_hide(orig_nr, (struct pt_regs *)regs);
+        if (hide_ret == -ENOENT)
+            return -ENOENT;
+    }
+
     if (!static_branch_unlikely(&ksu_su_compat_enabled))
         return ksu_call_syscall(orig_nr, regs);
 
     return ksu_handle_faccessat_sucompat_internal(orig_nr, (struct pt_regs *)regs);
+}
+
+long __nocfi ksu_hook_openat(int orig_nr, const struct pt_regs *regs)
+{
+    if (ksu_vfs_hide_enabled) {
+        long hide_ret = ksu_handle_openat_vfs_hide(orig_nr, (struct pt_regs *)regs);
+        if (hide_ret == -ENOENT)
+            return -ENOENT;
+    }
+
+    return ksu_call_syscall(orig_nr, regs);
 }
 
 // there are for tracepoint syscall redirect hook

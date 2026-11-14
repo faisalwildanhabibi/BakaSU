@@ -9,6 +9,7 @@ kernelsu-objs += feature/adb_root.o
 kernelsu-objs += feature/selinux_hide.o
 kernelsu-objs += feature/shell_su_adb_only.o
 kernelsu-objs += feature/module_blacklist.o
+kernelsu-objs += feature/vfs_hide.o
 kernelsu-objs += hook/setuid_hook.o
 
 ifndef CONFIG_KSU_DISABLE_MANAGER

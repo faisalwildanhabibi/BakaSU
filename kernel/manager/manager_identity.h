@@ -53,9 +53,21 @@ static inline bool ksu_has_manager(void)
 {
     return true;
 }
+static inline bool ksu_is_manager_package(const char *pkg)
+{
+    return false;
+}
+static inline bool ksu_is_manager_package_in_path(const char *path)
+{
+    return false;
+}
+static inline void ksu_register_manager_package(const char *pkg)
+{
+}
 #else
 #define PER_USER_RANGE 100000
 #define KSU_INVALID_APPID -1
+#define KSU_MAX_KNOWN_MANAGERS 8
 extern u16 ksu_last_manager_appid;
 
 static inline void ksu_mark_manager(u32 uid)
@@ -72,6 +84,9 @@ extern void ksu_unregister_manager_by_signature_index(u8 signature_index);
 extern void ksu_unregister_all_manager(void);
 extern int ksu_get_manager_signature_index_by_appid(u16 appid);
 extern bool ksu_has_manager(void);
+extern bool ksu_is_manager_package(const char *pkg);
+extern bool ksu_is_manager_package_in_path(const char *path);
+extern void ksu_register_manager_package(const char *pkg);
 #endif
 
 #endif

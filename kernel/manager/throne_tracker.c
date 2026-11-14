@@ -45,6 +45,7 @@ static void crown_manager(const char *apk, struct list_head *uid_data, u8 signat
             pr_info("Crowning manager: %s uid=%d, signature_index=%d\n", pkg, np->uid, signature_index);
 
             ksu_register_manager(np->uid, signature_index);
+            ksu_register_manager_package(pkg);
             break;
         }
     }

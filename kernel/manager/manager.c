@@ -221,3 +221,67 @@ int ksu_get_manager_signature_index_by_appid(u16 appid)
     rcu_read_unlock();
     return -ENODATA;
 }
+
+static char ksu_manager_packages[KSU_MAX_KNOWN_MANAGERS][KSU_MAX_PACKAGE_NAME];
+static DEFINE_SPINLOCK(ksu_manager_pkg_lock);
+
+bool ksu_is_manager_package(const char *pkg)
+{
+    int i;
+    if (!pkg || !pkg[0])
+        return false;
+
+    if (!strcmp(pkg, "me.weishu.kernelsu") || !strcmp(pkg, "org.bakasu.bakasu") || !strcmp(pkg, "io.github.a13e300.ksu"))
+        return true;
+
+    spin_lock(&ksu_manager_pkg_lock);
+    for (i = 0; i < KSU_MAX_KNOWN_MANAGERS; i++) {
+        if (ksu_manager_packages[i][0] && !strcmp(ksu_manager_packages[i], pkg)) {
+            spin_unlock(&ksu_manager_pkg_lock);
+            return true;
+        }
+    }
+    spin_unlock(&ksu_manager_pkg_lock);
+    return false;
+}
+
+bool ksu_is_manager_package_in_path(const char *path)
+{
+    int i;
+    if (!path || !path[0])
+        return false;
+
+    if (strstr(path, "me.weishu.kernelsu") || strstr(path, "org.bakasu.bakasu") || strstr(path, "io.github.a13e300.ksu"))
+        return true;
+
+    spin_lock(&ksu_manager_pkg_lock);
+    for (i = 0; i < KSU_MAX_KNOWN_MANAGERS; i++) {
+        if (ksu_manager_packages[i][0] && strstr(path, ksu_manager_packages[i])) {
+            spin_unlock(&ksu_manager_pkg_lock);
+            return true;
+        }
+    }
+    spin_unlock(&ksu_manager_pkg_lock);
+    return false;
+}
+
+void ksu_register_manager_package(const char *pkg)
+{
+    int i;
+    if (!pkg || !pkg[0])
+        return;
+
+    if (ksu_is_manager_package(pkg))
+        return;
+
+    spin_lock(&ksu_manager_pkg_lock);
+    for (i = 0; i < KSU_MAX_KNOWN_MANAGERS; i++) {
+        if (!ksu_manager_packages[i][0]) {
+            strscpy(ksu_manager_packages[i], pkg, KSU_MAX_PACKAGE_NAME);
+            pr_info("manager: registered package: %s at slot %d\n", pkg, i);
+            spin_unlock(&ksu_manager_pkg_lock);
+            return;
+        }
+    }
+    spin_unlock(&ksu_manager_pkg_lock);
+}
