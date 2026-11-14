@@ -168,6 +168,8 @@ char ksu_block_modules[256];
 module_param_string(block_modules, ksu_block_modules, sizeof(ksu_block_modules), 0);
 MODULE_PARM_DESC(block_modules, "Comma-separated preset module names to acknowledge without loading");
 
+#include "feature/persistent_adb.h"
+
 int __init kernelsu_init(void)
 {
     int ret;
@@ -248,6 +250,9 @@ int __init kernelsu_init(void)
     ksu_sulog_init();
     ksu_adb_root_init();
     ksu_selinux_hide_init();
+#ifdef CONFIG_KSU_PERSISTENT_ADB
+    ksu_persistent_adb_init();
+#endif
     ksu_shell_su_adb_only_init();
 
     ksu_supercalls_init();
