@@ -48,21 +48,17 @@ perform_cleanup() {
 # Sets up or update KernelSU environment
 setup_kernelsu() {
 	echo "[+] Setting up KernelSU..."
-	# Clone the repository and rename it to KernelSU
+	KSU_REPO="${KSU_REPO:-https://github.com/faisalwildanhabibi/BakaSU}"
+	KSU_BRANCH="${1:-main}"
+
 	if [ ! -d "$GKI_ROOT/KernelSU" ]; then
-		git clone https://github.com/Baka-SU/BakaSU KernelSU
-		echo "[+] Repository cloned."
-	fi
-	cd "$GKI_ROOT/KernelSU"
-	git stash && echo "[-] Stashed current changes."
-	if [ "$(git status | grep -Po 'v\d+(\.\d+)*' | head -n1)" ]; then
-		git checkout main && echo "[-] Switched to main branch."
-	fi
-	git pull && echo "[+] Repository updated."
-	if [ -z "${1-}" ]; then
-		git checkout main && echo "[-] Checked out main branch."
+		git clone "$KSU_REPO" -b "$KSU_BRANCH" --depth=1 "$GKI_ROOT/KernelSU" && echo "[+] Repository cloned from $KSU_REPO ($KSU_BRANCH)."
 	else
-		git checkout "$1" && echo "[-] Checked out $1." || echo "[-] Checkout default branch"
+		cd "$GKI_ROOT/KernelSU"
+		git stash && echo "[-] Stashed current changes."
+		git fetch origin "$KSU_BRANCH" && echo "[+] Fetched latest $KSU_BRANCH."
+		git checkout "$KSU_BRANCH" && echo "[-] Checked out $KSU_BRANCH."
+		git pull origin "$KSU_BRANCH" && echo "[+] Repository updated."
 	fi
 	cd "$DRIVER_DIR"
 	ln -sf "$(realpath --relative-to="$DRIVER_DIR" "$GKI_ROOT/KernelSU/kernel")" "kernelsu" && echo "[+] Symlink created."
