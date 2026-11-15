@@ -19,6 +19,35 @@ static const char *RESUSFS_DIR_UPPER = "/data/adb/ReSuSFS";
 static const char *RESUSFS_DIR_LOWER = "/data/adb/resusfs";
 static const char *KSU_DIR           = "/data/adb/ksu";
 
+// Active Zygisk modules search paths (ZygiskNext, ReZygisk, BuiltinZygisk)
+static const std::vector<std::string> ZYGISK_PROVIDER_MODULES = {
+    "/data/adb/modules/zygisknext",
+    "/data/adb/modules/zygisk_next",
+    "/data/adb/modules/rezygisk",
+    "/data/adb/modules/ReZygisk",
+    "/data/adb/modules/zygisksu",
+    "/data/adb/modules/builtin_zygisk"
+};
+
+static bool is_zygisk_provider_active() {
+    struct stat st{};
+    for (const auto &mod_path : ZYGISK_PROVIDER_MODULES) {
+        if (stat(mod_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+            std::string disable_file = mod_path + "/disable";
+            std::string remove_file  = mod_path + "/remove";
+            if (stat(disable_file.c_str(), &st) != 0 && stat(remove_file.c_str(), &st) != 0) {
+                LOGI("KsuPmsGuard: Detected active Zygisk provider at: %s", mod_path.c_str());
+                return true;
+            }
+        }
+    }
+    // Check if zygisk daemon / socket or generic Zygisk environment is active
+    if (stat("/dev/zygisk", &st) == 0 || stat("/data/adb/zygisk", &st) == 0) {
+        return true;
+    }
+    return false;
+}
+
 // Default root packages to conceal automatically by default
 static const std::vector<std::string> DEFAULT_CONCEALED_PACKAGES = {
     "org.bakasu.bakasu",
@@ -131,6 +160,9 @@ public:
     }
 
     void postServerSpecialize(const zygisk::ServerSpecializeArgs *args) override {
+        if (!is_zygisk_provider_active()) {
+            LOGI("KsuPmsGuard: No standalone Zygisk provider detected (ZygiskNext/ReZygisk). Kernel VFS cloaking remains active.");
+        }
         LOGI("KsuPmsGuard: system_server active (UID %d), deploying dynamic ReSuSFS framework cloaking", args->uid);
         deployFrameworkDualWorldHooks(env);
     }
