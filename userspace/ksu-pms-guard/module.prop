@@ -1,6 +1,0 @@
-id=ksu-pms-guard
-name=KernelSU Dual-World PMS & VFS Guard
-version=v1.1.0
-versionCode=110
-author=faisalwildanhabibi & KernelSU
-description=Native HMA-OSS (Settings/Accessibility/AppsFilter) and TargetedHide (SuSFS/Denylist) dual-world cloaking for KernelSU.
