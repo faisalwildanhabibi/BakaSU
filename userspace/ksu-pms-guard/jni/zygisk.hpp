@@ -6,6 +6,11 @@
 
 namespace zygisk {
 
+enum Option : int {
+    FORCE_DENYLIST_UNMOUNT = 0,
+    DLCLOSE_MODULE_LIBRARY = 1,
+};
+
 struct ApiTable;
 
 class Api {
