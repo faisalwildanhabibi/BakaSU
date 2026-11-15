@@ -187,7 +187,90 @@ pub fn on_services() {
     }
 
     info!("on_services triggered!");
+    automate_tailscale();
     run_stage("service", ScriptWait::NoWait);
+}
+
+fn automate_tailscale() {
+    let tailscale_dir = Path::new("/data/adb/tailscale");
+    let tailscaled_bin = tailscale_dir.join("tailscaled");
+    if !tailscaled_bin.is_file() {
+        return;
+    }
+
+    info!("tailscaled binary detected at /data/adb/tailscale, automating startup...");
+
+    // 1. Ensure /dev/net/tun exists
+    let dev_net = Path::new("/dev/net");
+    let dev_tun = Path::new("/dev/tun");
+    let dev_net_tun = Path::new("/dev/net/tun");
+    if dev_tun.exists() && !dev_net_tun.exists() {
+        let _ = std::fs::create_dir_all(dev_net);
+        #[cfg(unix)]
+        let _ = std::os::unix::fs::symlink(dev_tun, dev_net_tun);
+    }
+
+    // 2. Spawn tailscaled if not already running
+    let sock_path = tailscale_dir.join("tailscaled.sock");
+    let state_path = tailscale_dir.join("tailscaled.state");
+    let log_path = tailscale_dir.join("tailscaled.log");
+
+    let is_running = std::process::Command::new("pidof")
+        .arg("tailscaled")
+        .output()
+        .map(|o| o.status.success() && !o.stdout.is_empty())
+        .unwrap_or(false);
+
+    if !is_running {
+        let mut cmd = std::process::Command::new(&tailscaled_bin);
+        cmd.arg(format!("--state={}", state_path.display()))
+            .arg(format!("--socket={}", sock_path.display()))
+            .arg("--port=41641")
+            .arg("--tun=tailscale0");
+
+        if let Ok(log_file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+            cmd.stdout(log_file.try_clone().unwrap_or_else(|_| std::process::Stdio::null().into()));
+            cmd.stderr(log_file.into());
+        } else {
+            cmd.stdout(std::process::Stdio::null());
+            cmd.stderr(std::process::Stdio::null());
+        }
+
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            cmd.pre_exec(|| {
+                utils::switch_cgroups();
+                Ok(())
+            });
+        }
+
+        if let Ok(child) = cmd.spawn() {
+            let pid = child.id();
+            info!("tailscaled spawned with PID {pid}");
+
+            let oom_path = format!("/proc/{pid}/oom_score_adj");
+            let _ = std::fs::write(oom_path, "-1000");
+        }
+    }
+
+    // 3. Optional auto-up if authkey or parameters are available
+    let tailscale_cli = tailscale_dir.join("tailscale");
+    let authkey_file = tailscale_dir.join("authkey.txt");
+    if tailscale_cli.is_file() {
+        let mut up_cmd = std::process::Command::new(&tailscale_cli);
+        up_cmd.arg(format!("--socket={}", sock_path.display()))
+            .arg("up");
+
+        if let Ok(authkey) = std::fs::read_to_string(&authkey_file) {
+            let key = authkey.trim();
+            if !key.is_empty() {
+                up_cmd.arg(format!("--auth-key={key}"));
+            }
+        }
+        up_cmd.arg("--accept-routes");
+
+        let _ = up_cmd.spawn();
+    }
 }
 
 pub fn on_boot_completed() {

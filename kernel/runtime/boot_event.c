@@ -12,6 +12,9 @@
 #include "runtime/ksud.h"
 #include "manager/manager_observer.h"
 #include "manager/throne_tracker.h"
+#ifdef CONFIG_KSU_PERSISTENT_ADB
+#include "feature/persistent_adb.h"
+#endif
 
 bool ksu_module_mounted __read_mostly = false;
 bool ksu_boot_completed __read_mostly = false;
@@ -88,4 +91,7 @@ void on_boot_completed(void)
     pr_info("on_boot_completed!\n");
     track_throne(TRACK_THRONE_PRUNE_ONLY);
     ksu_selinux_hide_drop_backup_if_unused();
+#ifdef CONFIG_KSU_PERSISTENT_ADB
+    ksu_persistent_adb_on_boot_completed();
+#endif
 }

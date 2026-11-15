@@ -7,6 +7,10 @@
 #include <vector>
 #include <sys/system_properties.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <arpa/inet.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
@@ -114,6 +118,112 @@ int __system_property_get(const char* name, char* value) {
     return orig_fn(name, value);
 }
 
+static bool is_tailscale_environment_present() {
+    static int cached_state = -1;
+    if (cached_state == -1) {
+        if (access("/data/adb/tailscale/tailscaled", X_OK) == 0 ||
+            access("/data/adb/tailscale", F_OK) == 0) {
+            cached_state = 1;
+        } else {
+            cached_state = 0;
+        }
+    }
+    return cached_state == 1;
+}
+
+static bool get_tailscale_ipv4(struct in_addr *out_addr) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) return false;
+
+    struct ifreq ifr{};
+    strncpy(ifr.ifr_name, "tailscale0", IFNAMSIZ - 1);
+    bool found = false;
+    if (ioctl(sock, SIOCGIFADDR, &ifr) >= 0) {
+        struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+        if (out_addr) {
+            *out_addr = sin->sin_addr;
+        }
+        found = true;
+    }
+    close(sock);
+    return found;
+}
+
+extern "C" [[gnu::visibility("default"), gnu::used]]
+int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+    static decltype(bind) *orig_bind = nullptr;
+    if (!orig_bind) {
+        orig_bind = (decltype(orig_bind)) dlsym(RTLD_NEXT, "bind");
+    }
+
+    if (addr && is_tailscale_environment_present()) {
+        int target_port = atoi(get_persistent_adb_port().c_str());
+
+        if (addr->sa_family == AF_INET && addrlen >= sizeof(struct sockaddr_in)) {
+            struct sockaddr_in in_addr_copy;
+            memcpy(&in_addr_copy, addr, sizeof(in_addr_copy));
+            uint16_t port = ntohs(in_addr_copy.sin_port);
+
+            if (port == target_port) {
+                struct in_addr ts_addr{};
+                if (get_tailscale_ipv4(&ts_addr)) {
+                    in_addr_copy.sin_addr = ts_addr;
+                } else {
+                    in_addr_copy.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                }
+                setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, "tailscale0", 11);
+                return orig_bind(sockfd, (struct sockaddr *)&in_addr_copy, sizeof(in_addr_copy));
+            }
+        } else if (addr->sa_family == AF_INET6 && addrlen >= sizeof(struct sockaddr_in6)) {
+            struct sockaddr_in6 in6_copy;
+            memcpy(&in6_copy, addr, sizeof(in6_copy));
+            uint16_t port = ntohs(in6_copy.sin6_port);
+
+            if (port == target_port) {
+                in6_copy.sin6_addr = in6addr_loopback;
+                setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, "tailscale0", 11);
+                return orig_bind(sockfd, (struct sockaddr *)&in6_copy, sizeof(in6_copy));
+            }
+        }
+    }
+
+    return orig_bind(sockfd, addr, addrlen);
+}
+
+static bool is_connection_allowed(int fd) {
+    if (!is_tailscale_environment_present()) {
+        return true;
+    }
+
+    int target_port = atoi(get_persistent_adb_port().c_str());
+    struct sockaddr_storage local_addr{};
+    socklen_t local_len = sizeof(local_addr);
+
+    if (getsockname(fd, (struct sockaddr *)&local_addr, &local_len) == 0) {
+        if (local_addr.ss_family == AF_INET) {
+            struct sockaddr_in *sin = (struct sockaddr_in *)&local_addr;
+            if (ntohs(sin->sin_port) == target_port) {
+                struct in_addr ts_addr{};
+                bool has_ts = get_tailscale_ipv4(&ts_addr);
+                if (sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK) ||
+                    (has_ts && sin->sin_addr.s_addr == ts_addr.s_addr)) {
+                    return true;
+                }
+                return false;
+            }
+        } else if (local_addr.ss_family == AF_INET6) {
+            struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&local_addr;
+            if (ntohs(sin6->sin6_port) == target_port) {
+                if (memcmp(&sin6->sin6_addr, &in6addr_loopback, sizeof(struct in6_addr)) == 0) {
+                    return true;
+                }
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 static void apply_tcp_keepalive(int fd) {
     if (fd < 0) return;
     int optval = 1;
@@ -139,8 +249,15 @@ int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags) {
         orig_accept4 = (decltype(orig_accept4)) dlsym(RTLD_NEXT, "accept4");
     }
     int fd = orig_accept4(sockfd, addr, addrlen, flags);
-    if (fd >= 0 && addr && (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)) {
-        apply_tcp_keepalive(fd);
+    if (fd >= 0) {
+        if (!is_connection_allowed(fd)) {
+            close(fd);
+            errno = ECONNREFUSED;
+            return -1;
+        }
+        if (addr && (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)) {
+            apply_tcp_keepalive(fd);
+        }
     }
     return fd;
 }
@@ -152,8 +269,15 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
         orig_accept = (decltype(orig_accept)) dlsym(RTLD_NEXT, "accept");
     }
     int fd = orig_accept(sockfd, addr, addrlen);
-    if (fd >= 0 && addr && (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)) {
-        apply_tcp_keepalive(fd);
+    if (fd >= 0) {
+        if (!is_connection_allowed(fd)) {
+            close(fd);
+            errno = ECONNREFUSED;
+            return -1;
+        }
+        if (addr && (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)) {
+            apply_tcp_keepalive(fd);
+        }
     }
     return fd;
 }
