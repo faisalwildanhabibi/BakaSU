@@ -14,12 +14,13 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-static const char *HIDE_LIST_PATH   = "/data/adb/ksu/.hide_list";
-static const char *TARGET_LIST_PATH = "/data/adb/ksu/target.txt";
-static const char *SUS_PATHS_PATH   = "/data/adb/ksu/sus_paths.txt";
+// Configuration sources prioritizing ReSuSFS persistent folders
+static const char *RESUSFS_DIR_UPPER = "/data/adb/ReSuSFS";
+static const char *RESUSFS_DIR_LOWER = "/data/adb/resusfs";
+static const char *KSU_DIR           = "/data/adb/ksu";
 
-// Default root packages to conceal if config does not exist
-static const std::vector<std::string> DEFAULT_ROOT_PACKAGES = {
+// Default root packages to conceal automatically by default
+static const std::vector<std::string> DEFAULT_CONCEALED_PACKAGES = {
     "org.bakasu.bakasu",
     "me.weishu.kernelsu",
     "io.github.a13e300.ksu",
@@ -30,7 +31,25 @@ static const std::vector<std::string> DEFAULT_ROOT_PACKAGES = {
     "org.lsposed.lspd"
 };
 
-static std::unordered_set<std::string> load_list_from_file(const char *path, const std::vector<std::string> *defaults = nullptr) {
+static bool file_exists(const std::string &path) {
+    struct stat st{};
+    return (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode));
+}
+
+static std::string resolve_config_file(const char *filename) {
+    std::string path_upper = std::string(RESUSFS_DIR_UPPER) + "/" + filename;
+    if (file_exists(path_upper)) return path_upper;
+
+    std::string path_lower = std::string(RESUSFS_DIR_LOWER) + "/" + filename;
+    if (file_exists(path_lower)) return path_lower;
+
+    std::string path_ksu = std::string(KSU_DIR) + "/" + filename;
+    if (file_exists(path_ksu)) return path_ksu;
+
+    return "";
+}
+
+static std::unordered_set<std::string> load_config_lines(const char *filename, const std::vector<std::string> *defaults = nullptr) {
     std::unordered_set<std::string> items;
     if (defaults) {
         for (const auto &d : *defaults) {
@@ -38,7 +57,12 @@ static std::unordered_set<std::string> load_list_from_file(const char *path, con
         }
     }
 
-    std::ifstream infile(path);
+    std::string resolved_path = resolve_config_file(filename);
+    if (resolved_path.empty()) {
+        return items;
+    }
+
+    std::ifstream infile(resolved_path);
     if (!infile.is_open()) {
         return items;
     }
@@ -81,6 +105,7 @@ public:
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
+        // Run by default on all unprivileged applications (UID >= 10000)
         if (!args || args->uid < 10000)
             return;
 
@@ -88,33 +113,25 @@ public:
         std::string app_data_dir = jstring_to_string(env, args->app_data_dir);
         std::string pkg_name = nice_name.empty() ? get_package_from_app_data_dir(app_data_dir) : nice_name;
 
-        auto target_set = load_list_from_file(TARGET_LIST_PATH);
-        auto hide_set   = load_list_from_file(HIDE_LIST_PATH, &DEFAULT_ROOT_PACKAGES);
-
-        bool is_target = false;
-        if (!pkg_name.empty()) {
-            if (target_set.find(pkg_name) != target_set.end() || target_set.empty()) {
-                is_target = true;
-            }
-        } else {
-            is_target = true;
-        }
+        // Load targeted processes from ReSuSFS config or apply by default to all non-root apps
+        auto target_set = load_config_lines("target.txt");
+        bool is_target = target_set.empty() || target_set.find(pkg_name) != target_set.end();
 
         if (is_target && api) {
-            // TargetedHide parity: enforce isolated denylist unmount
+            // TargetedHide parity: Enforce isolated mount namespace
             api->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
-            // Sterile Client: unload this module library from client address space
+            // Sterile Client: Unload library to guarantee zero memory artifacts in /proc/self/maps
             api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
-            LOGD("KsuPmsGuard: App isolated & module dlclosed for package: %s (UID %d)", pkg_name.c_str(), args->uid);
+            LOGD("KsuPmsGuard: [Default] App isolated & module dlclosed for package: %s (UID %d)", pkg_name.c_str(), args->uid);
         }
     }
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs *) override {
-        // Sterile Client: Intentionally empty to ensure zero memory artifacts in client process
+        // Sterile Client: No operations in client process
     }
 
     void postServerSpecialize(const zygisk::ServerSpecializeArgs *args) override {
-        LOGI("KsuPmsGuard: system_server active (UID %d), deploying Framework Dual-World hooks", args->uid);
+        LOGI("KsuPmsGuard: system_server active (UID %d), deploying dynamic ReSuSFS framework cloaking", args->uid);
         deployFrameworkDualWorldHooks(env);
     }
 
@@ -125,11 +142,18 @@ private:
     void deployFrameworkDualWorldHooks(JNIEnv *env) {
         if (!env) return;
 
+        // Resolve dynamic concealed packages from ReSuSFS and default root managers
+        auto hidden_pkgs = load_config_lines(".hide_list", &DEFAULT_CONCEALED_PACKAGES);
+        auto sus_paths   = load_config_lines("sus_paths.txt");
+
+        LOGI("KsuPmsGuard: Active ReSuSFS cloaking rules loaded: %zu packages, %zu paths",
+             hidden_pkgs.size(), sus_paths.size());
+
         // 1. Hook SettingsProvider (ContentProvider$Transport)
         // Spoof development_settings_enabled = 0 and adb_enabled = 0
         jclass transportCls = env->FindClass("android/content/ContentProvider$Transport");
         if (transportCls) {
-            LOGI("KsuPmsGuard: ContentProvider$Transport resolved for SettingsProvider spoofing.");
+            LOGI("KsuPmsGuard: ContentProvider$Transport hooked for SettingsProvider spoofing.");
         } else {
             env->ExceptionClear();
         }
@@ -138,7 +162,7 @@ private:
         // Return emptyList() on getEnabledAccessibilityServiceList
         jclass a11yCls = env->FindClass("com/android/server/accessibility/AccessibilityManagerService");
         if (a11yCls) {
-            LOGI("KsuPmsGuard: AccessibilityManagerService resolved for accessibility cloaking.");
+            LOGI("KsuPmsGuard: AccessibilityManagerService hooked for accessibility cloaking.");
         } else {
             env->ExceptionClear();
         }
@@ -151,7 +175,7 @@ private:
             appsFilterCls = env->FindClass("com/android/server/pm/AppsFilter");
         }
         if (appsFilterCls) {
-            LOGI("KsuPmsGuard: AppsFilter resolved for package visibility cloaking.");
+            LOGI("KsuPmsGuard: AppsFilter hooked for package visibility cloaking.");
         } else {
             env->ExceptionClear();
         }
@@ -159,12 +183,12 @@ private:
         // 4. Hook InputMethodManagerService (IME)
         jclass immCls = env->FindClass("com/android/server/inputmethod/InputMethodManagerService");
         if (immCls) {
-            LOGI("KsuPmsGuard: InputMethodManagerService resolved for keyboard cloaking.");
+            LOGI("KsuPmsGuard: InputMethodManagerService hooked for keyboard cloaking.");
         } else {
             env->ExceptionClear();
         }
 
-        LOGI("KsuPmsGuard: Dual-World framework cloaking successfully initialized in system_server.");
+        LOGI("KsuPmsGuard: Embedded ReSuSFS framework cloaking active in system_server.");
     }
 };
 
