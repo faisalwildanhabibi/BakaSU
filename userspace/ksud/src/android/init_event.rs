@@ -222,6 +222,16 @@ fn automate_tailscale() {
         .unwrap_or(false);
 
     if !is_running {
+        // Clean stale socket file if daemon is not running
+        if sock_path.exists() {
+            let _ = std::fs::remove_file(&sock_path);
+        }
+
+        // Ensure proper permissions for TUN devices
+        let _ = std::process::Command::new("chmod")
+            .args(["0666", "/dev/net/tun", "/dev/tun"])
+            .status();
+
         let mut cmd = std::process::Command::new(&tailscaled_bin);
         cmd.arg(format!("--state={}", state_path.display()))
             .arg(format!("--socket={}", sock_path.display()))
