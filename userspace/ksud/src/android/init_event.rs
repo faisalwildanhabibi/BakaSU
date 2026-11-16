@@ -192,24 +192,13 @@ pub fn on_services() {
 }
 
 fn automate_tailscale() {
-    let tailscale_dir = if Path::new("/data/adb/tailscale/tailscaled").is_file() {
-        Path::new("/data/adb/tailscale")
-    } else if Path::new("/data/adb/Tailscale/tailscaled").is_file() {
-        Path::new("/data/adb/Tailscale")
-    } else if Path::new("/data/adb/tailscale").is_dir() {
-        Path::new("/data/adb/tailscale")
-    } else if Path::new("/data/adb/Tailscale").is_dir() {
-        Path::new("/data/adb/Tailscale")
-    } else {
-        return;
-    };
-
+    let tailscale_dir = Path::new("/data/adb/tailscale");
     let tailscaled_bin = tailscale_dir.join("tailscaled");
     if !tailscaled_bin.is_file() {
         return;
     }
 
-    info!("tailscaled binary detected at {}, automating startup...", tailscale_dir.display());
+    info!("tailscaled binary detected at /data/adb/tailscale, automating startup...");
 
     // 1. Ensure /dev/net/tun exists
     let dev_net = Path::new("/dev/net");
@@ -243,8 +232,13 @@ fn automate_tailscale() {
             .args(["0666", "/dev/net/tun", "/dev/tun"])
             .status();
 
+        let cache_dir = tailscale_dir.join(".cache");
+        let _ = std::fs::create_dir_all(&cache_dir);
+
         let mut cmd = std::process::Command::new(&tailscaled_bin);
-        cmd.arg(format!("--state={}", state_path.display()))
+        cmd.env("HOME", "/data/adb/tailscale")
+            .env("XDG_CACHE_HOME", "/data/adb/tailscale/.cache")
+            .arg(format!("--state={}", state_path.display()))
             .arg(format!("--socket={}", sock_path.display()))
             .arg("--port=41641")
             .arg("--tun=tailscale0");
@@ -279,7 +273,9 @@ fn automate_tailscale() {
     let authkey_file = tailscale_dir.join("authkey.txt");
     if tailscale_cli.is_file() {
         let mut up_cmd = std::process::Command::new(&tailscale_cli);
-        up_cmd.arg(format!("--socket={}", sock_path.display()))
+        up_cmd.env("HOME", "/data/adb/tailscale")
+            .env("XDG_CACHE_HOME", "/data/adb/tailscale/.cache")
+            .arg(format!("--socket={}", sock_path.display()))
             .arg("up");
 
         if let Ok(authkey) = std::fs::read_to_string(&authkey_file) {
