@@ -235,9 +235,20 @@ fn automate_tailscale() {
         let cache_dir = tailscale_dir.join(".cache");
         let _ = std::fs::create_dir_all(&cache_dir);
 
+        // Ensure CA bundle is available for Go's crypto/x509
+        let cacert_path = tailscale_dir.join("cacert.pem");
+        if !cacert_path.exists() {
+            let _ = std::process::Command::new("sh")
+                .arg("-c")
+                .arg("cat /system/etc/security/cacerts/* > /data/adb/tailscale/cacert.pem 2>/dev/null")
+                .status();
+        }
+
         let mut cmd = std::process::Command::new(&tailscaled_bin);
         cmd.env("HOME", "/data/adb/tailscale")
             .env("XDG_CACHE_HOME", "/data/adb/tailscale/.cache")
+            .env("SSL_CERT_DIR", "/system/etc/security/cacerts")
+            .env("SSL_CERT_FILE", "/data/adb/tailscale/cacert.pem")
             .arg(format!("--state={}", state_path.display()))
             .arg(format!("--socket={}", sock_path.display()))
             .arg("--port=41641")
@@ -275,6 +286,8 @@ fn automate_tailscale() {
         let mut up_cmd = std::process::Command::new(&tailscale_cli);
         up_cmd.env("HOME", "/data/adb/tailscale")
             .env("XDG_CACHE_HOME", "/data/adb/tailscale/.cache")
+            .env("SSL_CERT_DIR", "/system/etc/security/cacerts")
+            .env("SSL_CERT_FILE", "/data/adb/tailscale/cacert.pem")
             .arg(format!("--socket={}", sock_path.display()))
             .arg("up");
 
