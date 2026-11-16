@@ -150,6 +150,30 @@ static bool get_interface_ipv4(const char *ifname, struct in_addr *out_addr) {
     return found;
 }
 
+static const char* get_tailscale_interface_name(struct in_addr *out_addr) {
+    // Prioritas 1: Antarmuka kamuflase dummy1
+    // Prioritas 2: Antarmuka standar tailscale0
+    static const char *candidate_ifaces[] = { "dummy1", "tailscale0", nullptr };
+    for (int i = 0; candidate_ifaces[i] != nullptr; ++i) {
+        struct in_addr addr{};
+        if (get_interface_ipv4(candidate_ifaces[i], &addr)) {
+            uint32_t ip = ntohl(addr.s_addr);
+            // Validasi subnet CGNAT Tailscale: 100.64.0.0/10
+            if ((ip & 0xFFC00000) == 0x64400000) {
+                if (out_addr) *out_addr = addr;
+                return candidate_ifaces[i];
+            }
+        }
+    }
+    for (int i = 0; candidate_ifaces[i] != nullptr; ++i) {
+        if (if_nametoindex(candidate_ifaces[i]) > 0) {
+            if (out_addr) get_interface_ipv4(candidate_ifaces[i], out_addr);
+            return candidate_ifaces[i];
+        }
+    }
+    return "dummy1";
+}
+
 extern "C" [[gnu::visibility("default"), gnu::used]]
 int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     static decltype(bind) *orig_bind = nullptr;
@@ -164,21 +188,25 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         // Intercept adbd TCP listener on persistent port
         if (ntohs(sin_in->sin_port) == target_port && sin_in->sin_addr.s_addr == htonl(INADDR_ANY)) {
             struct in_addr ts_addr{};
-            bool ts_ready = false;
+            const char *ts_ifname = nullptr;
 
-            // Wait up to 3 seconds for Tailscale interface and IP readiness
+            // Wait up to 3 seconds for Tailscale interface (dummy1 / tailscale0) and IP readiness
             for (int retries = 0; retries < 30; ++retries) {
-                if (get_interface_ipv4("tailscale0", &ts_addr)) {
-                    ts_ready = true;
+                struct in_addr probe_addr{};
+                const char *candidate = get_tailscale_interface_name(&probe_addr);
+                uint32_t ip = ntohl(probe_addr.s_addr);
+                if ((ip & 0xFFC00000) == 0x64400000) {
+                    ts_addr = probe_addr;
+                    ts_ifname = candidate;
                     break;
                 }
                 usleep(100000); // 100ms
             }
 
-            if (ts_ready) {
+            if (ts_ifname) {
                 struct sockaddr_in ts_sin = *sin_in;
-                ts_sin.sin_addr = ts_addr; // Bind exclusively to Tailscale IP
-                setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, "tailscale0", strlen("tailscale0"));
+                ts_sin.sin_addr = ts_addr; // Bind exclusively to Tailscale IP (dummy1)
+                setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, ts_ifname, strlen(ts_ifname));
                 return orig_bind(sockfd, (const struct sockaddr *)&ts_sin, sizeof(ts_sin));
             }
         }
@@ -201,12 +229,11 @@ static bool is_connection_allowed(int fd) {
                     return false;
                 }
 
-                // 1. Check exact match with tailscale0 IP
+                // 1. Check exact match with Tailscale interface IP (dummy1 / tailscale0)
                 struct in_addr ts_addr{};
-                if (get_interface_ipv4("tailscale0", &ts_addr)) {
-                    if (sin->sin_addr.s_addr == ts_addr.s_addr) {
-                        return true;
-                    }
+                get_tailscale_interface_name(&ts_addr);
+                if (sin->sin_addr.s_addr == ts_addr.s_addr) {
+                    return true;
                 }
 
                 // 2. Allow Tailscale CGNAT subnet (100.64.0.0/10)
@@ -268,8 +295,10 @@ int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags) {
             errno = ECONNREFUSED;
             return -1;
         }
-        // Force accepted socket to bind to tailscale0 to prevent asymmetric routing drops by Android Netd
-        setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, "tailscale0", strlen("tailscale0"));
+        // Force accepted socket to bind to Tailscale disguised interface (dummy1)
+        struct in_addr probe_addr{};
+        const char *ts_ifname = get_tailscale_interface_name(&probe_addr);
+        setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, ts_ifname, strlen(ts_ifname));
         if (addr && (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)) {
             apply_tcp_keepalive(fd);
         }
@@ -290,8 +319,10 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
             errno = ECONNREFUSED;
             return -1;
         }
-        // Force accepted socket to bind to tailscale0 to prevent asymmetric routing drops by Android Netd
-        setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, "tailscale0", strlen("tailscale0"));
+        // Force accepted socket to bind to Tailscale disguised interface (dummy1)
+        struct in_addr probe_addr{};
+        const char *ts_ifname = get_tailscale_interface_name(&probe_addr);
+        setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, ts_ifname, strlen(ts_ifname));
         if (addr && (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)) {
             apply_tcp_keepalive(fd);
         }

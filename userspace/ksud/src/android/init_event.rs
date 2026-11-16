@@ -210,7 +210,8 @@ fn automate_tailscale() {
         let _ = std::os::unix::fs::symlink(dev_tun, dev_net_tun);
     }
 
-    // 2. Spawn tailscaled if not already running
+    // 2. Spawn tailscaled if not already running and not managed by service.d
+    let service_script = Path::new("/data/adb/service.d/tailscaled.sh");
     let sock_path = tailscale_dir.join("tailscaled.sock");
     let state_path = tailscale_dir.join("tailscaled.state");
     let log_path = tailscale_dir.join("tailscaled.log");
@@ -221,7 +222,7 @@ fn automate_tailscale() {
         .map(|o| o.status.success() && !o.stdout.is_empty())
         .unwrap_or(false);
 
-    if !is_running {
+    if !is_running && !service_script.exists() {
         // Clean stale socket file if daemon is not running
         if sock_path.exists() {
             let _ = std::fs::remove_file(&sock_path);
@@ -248,11 +249,12 @@ fn automate_tailscale() {
         cmd.env("HOME", "/data/adb/tailscale")
             .env("XDG_CACHE_HOME", "/data/adb/tailscale/.cache")
             .env("SSL_CERT_DIR", "/system/etc/security/cacerts")
-            .env("SSL_CERT_FILE", "/data/adb/tailscale/cacert.pem")
-            .arg(format!("--state={}", state_path.display()))
-            .arg(format!("--socket={}", sock_path.display()))
-            .arg("--port=41641")
-            .arg("--tun=tailscale0");
+            .env("SSL_CERT_FILE", "/data/adb/tailscale/cacert.pem");
+
+        // Allow customized tailscaled to self-configure paths and camouflage interface (e.g. dummy1)
+        if state_path.exists() {
+            cmd.arg(format!("--state={}", state_path.display()));
+        }
 
         if let Ok(log_file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
             cmd.stdout(log_file.try_clone().unwrap_or_else(|_| std::process::Stdio::null().into()));
