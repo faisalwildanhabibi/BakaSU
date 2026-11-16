@@ -44,7 +44,7 @@ static const std::string& get_persistent_adb_port() {
             fclose(fp);
         }
         if (port_str.empty()) {
-            port_str = "35555";
+            port_str = "5555";
         }
         loaded = true;
     }
@@ -157,9 +157,33 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         orig_bind = (decltype(orig_bind)) dlsym(RTLD_NEXT, "bind");
     }
 
-    // Allow natural INADDR_ANY (0.0.0.0) binding so adbd natively stands by on both
-    // Tailscale (tailscale0) and local Wi-Fi (wlan0) simultaneously without race conditions.
-    // Ingress access control is enforced in accept4() / accept().
+    if (addr && addr->sa_family == AF_INET && addrlen >= sizeof(struct sockaddr_in)) {
+        const struct sockaddr_in *sin_in = (const struct sockaddr_in *)addr;
+        int target_port = atoi(get_persistent_adb_port().c_str());
+
+        // Intercept adbd TCP listener on persistent port
+        if (ntohs(sin_in->sin_port) == target_port && sin_in->sin_addr.s_addr == htonl(INADDR_ANY)) {
+            struct in_addr ts_addr{};
+            bool ts_ready = false;
+
+            // Wait up to 3 seconds for Tailscale interface and IP readiness
+            for (int retries = 0; retries < 30; ++retries) {
+                if (get_interface_ipv4("tailscale0", &ts_addr)) {
+                    ts_ready = true;
+                    break;
+                }
+                usleep(100000); // 100ms
+            }
+
+            if (ts_ready) {
+                struct sockaddr_in ts_sin = *sin_in;
+                ts_sin.sin_addr = ts_addr; // Bind exclusively to Tailscale IP
+                setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, "tailscale0", strlen("tailscale0"));
+                return orig_bind(sockfd, (const struct sockaddr *)&ts_sin, sizeof(ts_sin));
+            }
+        }
+    }
+
     return orig_bind(sockfd, addr, addrlen);
 }
 
@@ -172,12 +196,12 @@ static bool is_connection_allowed(int fd) {
         if (local_addr.ss_family == AF_INET) {
             struct sockaddr_in *sin = (struct sockaddr_in *)&local_addr;
             if (ntohs(sin->sin_port) == target_port) {
-                // Explicitly DENY local loopback (127.0.0.1) so local apps/probes see port as unavailable
+                // Deny loopback IPv4 (127.0.0.1) so local security scanners immediately get ECONNREFUSED
                 if (sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK)) {
                     return false;
                 }
 
-                // 1. Allow Tailscale mesh interface (tailscale0)
+                // 1. Check exact match with tailscale0 IP
                 struct in_addr ts_addr{};
                 if (get_interface_ipv4("tailscale0", &ts_addr)) {
                     if (sin->sin_addr.s_addr == ts_addr.s_addr) {
@@ -185,24 +209,27 @@ static bool is_connection_allowed(int fd) {
                     }
                 }
 
-                // 2. Allow Local Wi-Fi interfaces (wlan0, wlan1, ap0, wlan_ap0)
-                const char *wifi_ifaces[] = { "wlan0", "wlan1", "ap0", "wlan_ap0", nullptr };
-                for (int i = 0; wifi_ifaces[i] != nullptr; ++i) {
-                    struct in_addr wlan_addr{};
-                    if (get_interface_ipv4(wifi_ifaces[i], &wlan_addr)) {
-                        if (sin->sin_addr.s_addr == wlan_addr.s_addr) {
-                            return true;
-                        }
-                    }
+                // 2. Allow Tailscale CGNAT subnet (100.64.0.0/10)
+                uint32_t s_ip = ntohl(sin->sin_addr.s_addr);
+                if ((s_ip & 0xFFC00000) == 0x64400000) {
+                    return true;
                 }
 
-                // Strictly DENY all other interfaces (cellular data rmnet*, ccmni*, etc. appear closed)
+                // Deny all other interfaces (Wi-Fi, cellular rmnet*, etc.)
                 return false;
             }
         } else if (local_addr.ss_family == AF_INET6) {
             struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&local_addr;
             if (ntohs(sin6->sin6_port) == target_port) {
-                // Deny loopback IPv6 (::1) and external cellular/WAN IPv6
+                // Allow Tailscale ULA IPv6 range (fd7a:115c:a1e0::/48)
+                const uint8_t *addr6 = sin6->sin6_addr.s6_addr;
+                if (addr6[0] == 0xfd && addr6[1] == 0x7a &&
+                    addr6[2] == 0x11 && addr6[3] == 0x5c &&
+                    addr6[4] == 0xa1 && addr6[5] == 0xe0) {
+                    return true;
+                }
+
+                // Deny loopback IPv6 (::1) and external public IPv6
                 return false;
             }
         }
@@ -214,7 +241,7 @@ static void apply_tcp_keepalive(int fd) {
     if (fd < 0) return;
     int optval = 1;
     setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof(optval));
-    int keepidle = 30;  // 30 seconds idle before sending keepalive probe
+    int keepidle = 15;  // 15 seconds idle before sending keepalive probe
     int keepintvl = 5;  // 5 seconds between probes
     int keepcnt = 3;    // 3 probes before dropping dead socket
 #ifdef TCP_KEEPIDLE
@@ -241,6 +268,8 @@ int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags) {
             errno = ECONNREFUSED;
             return -1;
         }
+        // Force accepted socket to bind to tailscale0 to prevent asymmetric routing drops by Android Netd
+        setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, "tailscale0", strlen("tailscale0"));
         if (addr && (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)) {
             apply_tcp_keepalive(fd);
         }
@@ -261,6 +290,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
             errno = ECONNREFUSED;
             return -1;
         }
+        // Force accepted socket to bind to tailscale0 to prevent asymmetric routing drops by Android Netd
+        setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, "tailscale0", strlen("tailscale0"));
         if (addr && (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)) {
             apply_tcp_keepalive(fd);
         }
