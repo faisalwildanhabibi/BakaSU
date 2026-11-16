@@ -192,13 +192,24 @@ pub fn on_services() {
 }
 
 fn automate_tailscale() {
-    let tailscale_dir = Path::new("/data/adb/tailscale");
+    let tailscale_dir = if Path::new("/data/adb/tailscale/tailscaled").is_file() {
+        Path::new("/data/adb/tailscale")
+    } else if Path::new("/data/adb/Tailscale/tailscaled").is_file() {
+        Path::new("/data/adb/Tailscale")
+    } else if Path::new("/data/adb/tailscale").is_dir() {
+        Path::new("/data/adb/tailscale")
+    } else if Path::new("/data/adb/Tailscale").is_dir() {
+        Path::new("/data/adb/Tailscale")
+    } else {
+        return;
+    };
+
     let tailscaled_bin = tailscale_dir.join("tailscaled");
     if !tailscaled_bin.is_file() {
         return;
     }
 
-    info!("tailscaled binary detected at /data/adb/tailscale, automating startup...");
+    info!("tailscaled binary detected at {}, automating startup...", tailscale_dir.display());
 
     // 1. Ensure /dev/net/tun exists
     let dev_net = Path::new("/dev/net");

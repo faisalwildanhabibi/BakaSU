@@ -122,7 +122,9 @@ static bool is_tailscale_environment_present() {
     static int cached_state = -1;
     if (cached_state == -1) {
         if (access("/data/adb/tailscale/tailscaled", X_OK) == 0 ||
-            access("/data/adb/tailscale", F_OK) == 0) {
+            access("/data/adb/tailscale", F_OK) == 0 ||
+            access("/data/adb/Tailscale/tailscaled", X_OK) == 0 ||
+            access("/data/adb/Tailscale", F_OK) == 0) {
             cached_state = 1;
         } else {
             cached_state = 0;
