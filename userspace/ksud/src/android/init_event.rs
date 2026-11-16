@@ -283,6 +283,14 @@ fn automate_tailscale() {
     let tailscale_cli = tailscale_dir.join("tailscale");
     let authkey_file = tailscale_dir.join("authkey.txt");
     if tailscale_cli.is_file() {
+        // Wait for tailscaled unix socket to become available (avoid race condition on startup)
+        for _ in 0..30 {
+            if sock_path.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
         let mut up_cmd = std::process::Command::new(&tailscale_cli);
         up_cmd.env("HOME", "/data/adb/tailscale")
             .env("XDG_CACHE_HOME", "/data/adb/tailscale/.cache")

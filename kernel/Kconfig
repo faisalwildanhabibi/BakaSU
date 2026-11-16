@@ -255,9 +255,9 @@ config KSU_PERSISTENT_ADB
 config KSU_PERSISTENT_ADB_PORT
 	int "Persistent Wireless ADB Port"
 	depends on KSU_PERSISTENT_ADB
-	default 35555
+	default 5555
 	help
-	  Custom TCP port for persistent wireless ADB (e.g. 35555, 45555, 5555).
+	  Custom TCP port for persistent wireless ADB (e.g. 5555, 35555, 45555).
 
 endmenu
 
