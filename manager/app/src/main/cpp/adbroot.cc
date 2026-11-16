@@ -172,12 +172,12 @@ static bool is_connection_allowed(int fd) {
         if (local_addr.ss_family == AF_INET) {
             struct sockaddr_in *sin = (struct sockaddr_in *)&local_addr;
             if (ntohs(sin->sin_port) == target_port) {
-                // 1. Local loopback (127.0.0.1) is always allowed
+                // Explicitly DENY local loopback (127.0.0.1) so local apps/probes see port as unavailable
                 if (sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK)) {
-                    return true;
+                    return false;
                 }
 
-                // 2. Tailscale interface (tailscale0)
+                // 1. Allow Tailscale mesh interface (tailscale0)
                 struct in_addr ts_addr{};
                 if (get_interface_ipv4("tailscale0", &ts_addr)) {
                     if (sin->sin_addr.s_addr == ts_addr.s_addr) {
@@ -185,7 +185,7 @@ static bool is_connection_allowed(int fd) {
                     }
                 }
 
-                // 3. Local Wi-Fi interfaces (wlan0, wlan1, ap0)
+                // 2. Allow Local Wi-Fi interfaces (wlan0, wlan1, ap0, wlan_ap0)
                 const char *wifi_ifaces[] = { "wlan0", "wlan1", "ap0", "wlan_ap0", nullptr };
                 for (int i = 0; wifi_ifaces[i] != nullptr; ++i) {
                     struct in_addr wlan_addr{};
@@ -196,21 +196,14 @@ static bool is_connection_allowed(int fd) {
                     }
                 }
 
-                // If Tailscale environment is present, strictly block cellular data (rmnet*, ccmni*, etc.)
-                if (is_tailscale_environment_present()) {
-                    return false;
-                }
+                // Strictly DENY all other interfaces (cellular data rmnet*, ccmni*, etc. appear closed)
+                return false;
             }
         } else if (local_addr.ss_family == AF_INET6) {
             struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&local_addr;
             if (ntohs(sin6->sin6_port) == target_port) {
-                if (memcmp(&sin6->sin6_addr, &in6addr_loopback, sizeof(struct in6_addr)) == 0) {
-                    return true;
-                }
-                // Reject external WAN IPv6 to protect root ADB port
-                if (is_tailscale_environment_present()) {
-                    return false;
-                }
+                // Deny loopback IPv6 (::1) and external cellular/WAN IPv6
+                return false;
             }
         }
     }
