@@ -294,6 +294,9 @@ pub fn on_boot_completed() {
 
     crate::android::preinit::on_boot_completed();
 
+    // Ensure Tailscale connects once all network subsystems are up
+    automate_tailscale();
+
     run_stage("boot-completed", ScriptWait::NoWait);
     // Load susfs boot-completed
     if !is_safe_mode() {
