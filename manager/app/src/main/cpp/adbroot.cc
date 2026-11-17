@@ -171,30 +171,65 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         orig_bind = (bind_fn_t)dlsym(RTLD_NEXT, "bind");
     }
 
-    if (addr && addr->sa_family == AF_INET && addrlen >= sizeof(struct sockaddr_in)) {
-        const struct sockaddr_in *sin_in = (const struct sockaddr_in *)addr;
+    if (addr) {
         int target_port = atoi(get_persistent_adb_port());
 
-        if (ntohs(sin_in->sin_port) == target_port && sin_in->sin_addr.s_addr == htonl(INADDR_ANY)) {
-            struct in_addr ts_addr;
-            memset(&ts_addr, 0, sizeof(ts_addr));
+        if (addr->sa_family == AF_INET && addrlen >= sizeof(struct sockaddr_in)) {
+            const struct sockaddr_in *sin_in = (const struct sockaddr_in *)addr;
+            if (ntohs(sin_in->sin_port) == target_port && sin_in->sin_addr.s_addr == htonl(INADDR_ANY)) {
+                struct in_addr ts_addr;
+                memset(&ts_addr, 0, sizeof(ts_addr));
+                const char *ts_ifname = NULL;
 
-            for (int retries = 0; retries < 30; ++retries) {
-                struct in_addr probe_addr;
-                memset(&probe_addr, 0, sizeof(probe_addr));
-                get_tailscale_interface_name(&probe_addr);
-                uint32_t ip = ntohl(probe_addr.s_addr);
-                if ((ip & 0xFFC00000) == 0x64400000) {
-                    ts_addr = probe_addr;
-                    break;
+                for (int retries = 0; retries < 30; ++retries) {
+                    struct in_addr probe_addr;
+                    memset(&probe_addr, 0, sizeof(probe_addr));
+                    const char *cand = get_tailscale_interface_name(&probe_addr);
+                    uint32_t ip = ntohl(probe_addr.s_addr);
+                    if ((ip & 0xFFC00000) == 0x64400000) {
+                        ts_addr = probe_addr;
+                        ts_ifname = cand;
+                        break;
+                    }
+                    usleep(100000);
                 }
-                usleep(100000); // 100ms
-            }
 
-            if (ts_addr.s_addr != 0) {
-                struct sockaddr_in ts_sin = *sin_in;
-                ts_sin.sin_addr = ts_addr; // Bind exclusively to Tailscale IP (dummy1)
-                return orig_bind(sockfd, (const struct sockaddr *)&ts_sin, sizeof(ts_sin));
+                if (ts_ifname) {
+                    setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, ts_ifname, strlen(ts_ifname));
+                }
+
+                if (ts_addr.s_addr != 0) {
+                    struct sockaddr_in ts_sin = *sin_in;
+                    ts_sin.sin_addr = ts_addr;
+                    return orig_bind(sockfd, (const struct sockaddr *)&ts_sin, sizeof(ts_sin));
+                }
+            }
+        } else if (addr->sa_family == AF_INET6 && addrlen >= sizeof(struct sockaddr_in6)) {
+            const struct sockaddr_in6 *sin6_in = (const struct sockaddr_in6 *)addr;
+            if (ntohs(sin6_in->sin6_port) == target_port) {
+                static const struct in6_addr any6 = IN6ADDR_ANY_INIT;
+                if (memcmp(&sin6_in->sin6_addr, &any6, sizeof(struct in6_addr)) == 0) {
+                    struct in_addr ts_addr;
+                    memset(&ts_addr, 0, sizeof(ts_addr));
+                    const char *ts_ifname = NULL;
+
+                    for (int retries = 0; retries < 30; ++retries) {
+                        struct in_addr probe_addr;
+                        memset(&probe_addr, 0, sizeof(probe_addr));
+                        const char *cand = get_tailscale_interface_name(&probe_addr);
+                        uint32_t ip = ntohl(probe_addr.s_addr);
+                        if ((ip & 0xFFC00000) == 0x64400000) {
+                            ts_addr = probe_addr;
+                            ts_ifname = cand;
+                            break;
+                        }
+                        usleep(100000);
+                    }
+
+                    if (ts_ifname) {
+                        setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, ts_ifname, strlen(ts_ifname));
+                    }
+                }
             }
         }
     }
