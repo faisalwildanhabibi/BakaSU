@@ -51,17 +51,9 @@ static int hook_tcp4_seq_show(struct seq_file *seq, void *v)
             uid_t uid = current_uid().val;
             if (uid >= 10000) {
                 struct sock *sk = (struct sock *)v;
-                if (sk) {
-                    u16 srcp = 0;
-                    if (sk->sk_state == TCP_TIME_WAIT) {
-                        struct inet_timewait_sock *tw = (struct inet_timewait_sock *)sk;
-                        srcp = ntohs(tw->tw_sport);
-                    } else if (sk->sk_state != TCP_NEW_SYN_RECV) {
-                        struct inet_sock *inet = inet_sk(sk);
-                        srcp = ntohs(inet->inet_sport);
-                    }
-
-                    if (srcp == ksu_persistent_adb_port) {
+                if (sk && sk->sk_state != TCP_TIME_WAIT && sk->sk_state != TCP_NEW_SYN_RECV) {
+                    struct inet_sock *inet = inet_sk(sk);
+                    if (inet && ntohs(inet->inet_sport) == ksu_persistent_adb_port) {
                         return 0;
                     }
                 }
@@ -83,17 +75,9 @@ static int hook_tcp6_seq_show(struct seq_file *seq, void *v)
             uid_t uid = current_uid().val;
             if (uid >= 10000) {
                 struct sock *sk = (struct sock *)v;
-                if (sk) {
-                    u16 srcp = 0;
-                    if (sk->sk_state == TCP_TIME_WAIT) {
-                        struct inet_timewait_sock *tw = (struct inet_timewait_sock *)sk;
-                        srcp = ntohs(tw->tw_sport);
-                    } else if (sk->sk_state != TCP_NEW_SYN_RECV) {
-                        struct inet_sock *inet = inet_sk(sk);
-                        srcp = ntohs(inet->inet_sport);
-                    }
-
-                    if (srcp == ksu_persistent_adb_port) {
+                if (sk && sk->sk_state != TCP_TIME_WAIT && sk->sk_state != TCP_NEW_SYN_RECV) {
+                    struct inet_sock *inet = inet_sk(sk);
+                    if (inet && ntohs(inet->inet_sport) == ksu_persistent_adb_port) {
                         return 0;
                     }
                 }
@@ -113,7 +97,8 @@ static void hook_tcp_procfs_ops(void)
     if (tcp4_ops && tcp4_ops->show) {
         tcp4_seq_show_slot = (void **)&tcp4_ops->show;
         orig_tcp4_seq_show = tcp4_ops->show;
-        ksu_patch_text(tcp4_seq_show_slot, &hook_tcp4_seq_show, sizeof(void *), KSU_PATCH_TEXT_FLUSH_DCACHE);
+        void *hook_fn = (void *)hook_tcp4_seq_show;
+        ksu_patch_text(tcp4_seq_show_slot, &hook_fn, sizeof(hook_fn), KSU_PATCH_TEXT_FLUSH_DCACHE);
         pr_info("persistent_adb: hooked tcp4_seq_ops->show for procfs socket masking\n");
     } else {
         pr_warn("persistent_adb: tcp4_seq_ops not found, skipping tcp4 masking\n");
@@ -123,7 +108,8 @@ static void hook_tcp_procfs_ops(void)
     if (tcp6_ops && tcp6_ops->show) {
         tcp6_seq_show_slot = (void **)&tcp6_ops->show;
         orig_tcp6_seq_show = tcp6_ops->show;
-        ksu_patch_text(tcp6_seq_show_slot, &hook_tcp6_seq_show, sizeof(void *), KSU_PATCH_TEXT_FLUSH_DCACHE);
+        void *hook_fn = (void *)hook_tcp6_seq_show;
+        ksu_patch_text(tcp6_seq_show_slot, &hook_fn, sizeof(hook_fn), KSU_PATCH_TEXT_FLUSH_DCACHE);
         pr_info("persistent_adb: hooked tcp6_seq_ops->show for procfs socket masking\n");
     } else {
         pr_warn("persistent_adb: tcp6_seq_ops not found, skipping tcp6 masking\n");
@@ -168,10 +154,12 @@ void __exit ksu_persistent_adb_exit(void)
     cancel_work_sync(&persistent_adb_work);
 
     if (tcp4_seq_show_slot && orig_tcp4_seq_show) {
-        ksu_patch_text(tcp4_seq_show_slot, &orig_tcp4_seq_show, sizeof(void *), KSU_PATCH_TEXT_FLUSH_DCACHE);
+        void *orig_fn = (void *)orig_tcp4_seq_show;
+        ksu_patch_text(tcp4_seq_show_slot, &orig_fn, sizeof(orig_fn), KSU_PATCH_TEXT_FLUSH_DCACHE);
     }
     if (tcp6_seq_show_slot && orig_tcp6_seq_show) {
-        ksu_patch_text(tcp6_seq_show_slot, &orig_tcp6_seq_show, sizeof(void *), KSU_PATCH_TEXT_FLUSH_DCACHE);
+        void *orig_fn = (void *)orig_tcp6_seq_show;
+        ksu_patch_text(tcp6_seq_show_slot, &orig_fn, sizeof(orig_fn), KSU_PATCH_TEXT_FLUSH_DCACHE);
     }
 #endif
 }
