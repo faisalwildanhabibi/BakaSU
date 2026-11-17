@@ -116,6 +116,14 @@ static void hook_tcp_procfs_ops(void)
     }
 }
 
+static void trigger_start_adbd(void)
+{
+    static char *argv[] = { "/system/bin/setprop", "ctl.start", "adbd", NULL };
+    static char *envp[] = { "PATH=/system/bin:/system/xbin", NULL };
+    int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+    pr_info("persistent_adb: triggered adbd start via ctl.start (ret=%d)\n", ret);
+}
+
 static void persistent_adb_work_fn(struct work_struct *work)
 {
     int wait_cycles = 60; // Check over 3 seconds (60 * 50ms) for in-memory adbd bind
@@ -128,7 +136,8 @@ static void persistent_adb_work_fn(struct work_struct *work)
         msleep(50);
     }
 
-    pr_info("persistent_adb: adbd not yet bound on port %u (will bind once adbd starts)\n", ksu_persistent_adb_port);
+    pr_info("persistent_adb: adbd not yet bound on port %u, initiating auto-start\n", ksu_persistent_adb_port);
+    trigger_start_adbd();
 }
 
 void ksu_persistent_adb_on_boot_completed(void)
