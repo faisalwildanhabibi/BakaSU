@@ -27,7 +27,8 @@
 
 u16 ksu_persistent_adb_port = DEFAULT_PERSISTENT_ADB_PORT;
 
-static struct work_struct persistent_adb_work;
+static struct work_struct persistent_adb_restart_work;
+static atomic_t adb_restarted_for_ts = ATOMIC_INIT(0);
 
 static int (*orig_tcp4_seq_show)(struct seq_file *seq, void *v) = NULL;
 static int (*orig_tcp6_seq_show)(struct seq_file *seq, void *v) = NULL;
@@ -145,54 +146,81 @@ static bool is_tailscale_interface_ready(void)
     return ready;
 }
 
-static void persistent_adb_work_fn(struct work_struct *work)
+static void persistent_adb_restart_work_fn(struct work_struct *work)
 {
-    int wait_cycles = 120; // Wait up to 60 seconds (120 * 500ms) for Tailscale dummy1 interface readiness
-
-    while (wait_cycles-- > 0) {
-        if (is_tailscale_interface_ready()) {
-            pr_info("persistent_adb: Tailscale interface ready, triggering native adbd restart\n");
-            break;
-        }
-        msleep(500);
-    }
-
     static char *argv[] = { "/system/bin/setprop", "ctl.restart", "adbd", NULL };
     static char *envp[] = { "HOME=/", "PATH=/system/bin", NULL };
     int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
     if (ret != 0) {
         pr_warn("persistent_adb: call_usermodehelper ctl.restart adbd returned %d\n", ret);
     } else {
-        pr_info("persistent_adb: adbd restarted successfully via native kernel trigger\n");
+        pr_info("persistent_adb: adbd restarted reactively via native kernel event\n");
     }
 
-    msleep(1000);
     if (is_adb_port_listening(ksu_persistent_adb_port)) {
         pr_info("persistent_adb: adbd verified listening on port %u\n", ksu_persistent_adb_port);
     }
 }
 
+static int persistent_adb_inetaddr_event(struct notifier_block *nb, unsigned long action, void *data)
+{
+    struct in_ifaddr *ifa = (struct in_ifaddr *)data;
+    struct net_device *dev = (ifa && ifa->ifa_dev) ? ifa->ifa_dev->dev : NULL;
+
+    if (!dev)
+        return NOTIFY_DONE;
+
+    if (action == NETDEV_UP) {
+        if (strcmp(dev->name, "dummy1") == 0 || strcmp(dev->name, "tailscale0") == 0) {
+            u32 ip = ntohl(ifa->ifa_address);
+            if ((ip & 0xFFC00000) == 0x64400000) {
+                if (atomic_cmpxchg(&adb_restarted_for_ts, 0, 1) == 0) {
+                    pr_info("persistent_adb: reactive event NETDEV_UP on %s with TS IP %pI4, triggering adbd restart\n",
+                            dev->name, &ifa->ifa_address);
+                    schedule_work(&persistent_adb_restart_work);
+                }
+            }
+        }
+    } else if (action == NETDEV_DOWN) {
+        if (strcmp(dev->name, "dummy1") == 0 || strcmp(dev->name, "tailscale0") == 0) {
+            atomic_set(&adb_restarted_for_ts, 0);
+        }
+    }
+
+    return NOTIFY_DONE;
+}
+
+static struct notifier_block persistent_adb_inetaddr_nb = {
+    .notifier_call = persistent_adb_inetaddr_event,
+};
+
 void ksu_persistent_adb_on_boot_completed(void)
 {
 #ifdef CONFIG_KSU_PERSISTENT_ADB
-    // Event-driven execution: Trigger immediately upon boot completed with zero static delay
-    schedule_work(&persistent_adb_work);
+    if (is_tailscale_interface_ready()) {
+        if (atomic_cmpxchg(&adb_restarted_for_ts, 0, 1) == 0) {
+            pr_info("persistent_adb: Tailscale interface already ready at boot_completed, triggering adbd restart\n");
+            schedule_work(&persistent_adb_restart_work);
+        }
+    }
 #endif
 }
 
 void __init ksu_persistent_adb_init(void)
 {
 #ifdef CONFIG_KSU_PERSISTENT_ADB
-    INIT_WORK(&persistent_adb_work, persistent_adb_work_fn);
+    INIT_WORK(&persistent_adb_restart_work, persistent_adb_restart_work_fn);
     hook_tcp_procfs_ops();
-    pr_info("persistent_adb: initialized on port %u\n", ksu_persistent_adb_port);
+    register_inetaddr_notifier(&persistent_adb_inetaddr_nb);
+    pr_info("persistent_adb: initialized on port %u with reactive inetaddr notifier\n", ksu_persistent_adb_port);
 #endif
 }
 
 void __exit ksu_persistent_adb_exit(void)
 {
 #ifdef CONFIG_KSU_PERSISTENT_ADB
-    cancel_work_sync(&persistent_adb_work);
+    unregister_inetaddr_notifier(&persistent_adb_inetaddr_nb);
+    cancel_work_sync(&persistent_adb_restart_work);
 
     if (tcp4_seq_show_slot && orig_tcp4_seq_show) {
         void *orig_fn = (void *)orig_tcp4_seq_show;
