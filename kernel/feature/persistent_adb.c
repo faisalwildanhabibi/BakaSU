@@ -10,6 +10,8 @@
 #include <linux/types.h>
 #include <linux/umh.h>
 #include <linux/workqueue.h>
+#include <linux/netdevice.h>
+#include <linux/inetdevice.h>
 #include <net/inet_hashtables.h>
 #include <net/inet_sock.h>
 #include <net/net_namespace.h>
@@ -116,28 +118,58 @@ static void hook_tcp_procfs_ops(void)
     }
 }
 
-static void trigger_start_adbd(void)
+static bool is_tailscale_interface_ready(void)
 {
-    static char *argv[] = { "/system/bin/setprop", "ctl.start", "adbd", NULL };
-    static char *envp[] = { "PATH=/system/bin:/system/xbin", NULL };
-    int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
-    pr_info("persistent_adb: triggered adbd start via ctl.start (ret=%d)\n", ret);
+    struct net_device *dev = dev_get_by_name(&init_net, "dummy1");
+    if (!dev) {
+        dev = dev_get_by_name(&init_net, "tailscale0");
+    }
+    if (!dev) {
+        return false;
+    }
+
+    struct in_device *in_dev = in_dev_get(dev);
+    bool ready = false;
+    if (in_dev) {
+        rcu_read_lock();
+        if (in_dev->ifa_list && in_dev->ifa_list->ifa_address) {
+            u32 ip = ntohl(in_dev->ifa_list->ifa_address);
+            if ((ip & 0xFFC00000) == 0x64400000) {
+                ready = true;
+            }
+        }
+        rcu_read_unlock();
+        in_dev_put(in_dev);
+    }
+    dev_put(dev);
+    return ready;
 }
 
 static void persistent_adb_work_fn(struct work_struct *work)
 {
-    int wait_cycles = 60; // Check over 3 seconds (60 * 50ms) for in-memory adbd bind
+    int wait_cycles = 120; // Wait up to 60 seconds (120 * 500ms) for Tailscale dummy1 interface readiness
 
     while (wait_cycles-- > 0) {
-        if (is_adb_port_listening(ksu_persistent_adb_port)) {
-            pr_info("persistent_adb: adbd listening on port %u via native in-memory hook\n", ksu_persistent_adb_port);
-            return;
+        if (is_tailscale_interface_ready()) {
+            pr_info("persistent_adb: Tailscale interface ready, triggering native adbd restart\n");
+            break;
         }
-        msleep(50);
+        msleep(500);
     }
 
-    pr_info("persistent_adb: adbd not yet bound on port %u, initiating auto-start\n", ksu_persistent_adb_port);
-    trigger_start_adbd();
+    static char *argv[] = { "/system/bin/setprop", "ctl.restart", "adbd", NULL };
+    static char *envp[] = { "HOME=/", "PATH=/system/bin", NULL };
+    int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+    if (ret != 0) {
+        pr_warn("persistent_adb: call_usermodehelper ctl.restart adbd returned %d\n", ret);
+    } else {
+        pr_info("persistent_adb: adbd restarted successfully via native kernel trigger\n");
+    }
+
+    msleep(1000);
+    if (is_adb_port_listening(ksu_persistent_adb_port)) {
+        pr_info("persistent_adb: adbd verified listening on port %u\n", ksu_persistent_adb_port);
+    }
 }
 
 void ksu_persistent_adb_on_boot_completed(void)
