@@ -259,6 +259,14 @@ config KSU_PERSISTENT_ADB_PORT
 	help
 	  Custom TCP port for persistent wireless ADB (e.g. 5555, 35555, 45555).
 
+config KSU_SUSFS_PRIORITY_UID_FILTER
+    bool "Enable SUSFS priority UID filter"
+    depends on KSU_SUSFS
+    default y
+    help
+        Hide configured application UIDs from getpriority, setpriority,
+        ioprio_get, and ioprio_set for unprivileged app processes.
+
 endmenu
 
 endmenu
