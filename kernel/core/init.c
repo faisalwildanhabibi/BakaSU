@@ -33,6 +33,7 @@
 #include "feature/sulog.h"
 #include "feature/adb_root.h"
 #include "feature/dynamic_manager.h"
+#include "extension/extension.h"
 #include "feature/module_blacklist.h"
 #include "feature/sucompat.h"
 #include "feature/selinux_hide/selinux_hide.h"
@@ -256,6 +257,11 @@ int __init kernelsu_init(void)
 #endif
     ksu_shell_su_adb_only_init();
 
+#ifndef CONFIG_KSU_DISABLE_MANAGER
+    ksu_extension_init();
+    ksu_extension_register_all();
+#endif
+
     ksu_supercalls_init();
     ksu_app_profile_init();
 
@@ -350,6 +356,9 @@ void __exit kernelsu_exit(void)
     ksu_sulog_exit();
     ksu_feature_exit();
     ksu_module_blacklist_exit();
+#ifndef CONFIG_KSU_DISABLE_MANAGER
+    ksu_extension_exit();
+#endif
 
     put_cred(ksu_cred);
 }

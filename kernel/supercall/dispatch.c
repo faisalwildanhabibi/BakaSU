@@ -32,6 +32,7 @@
 #endif
 #include "feature/dynamic_manager.h"
 #include "policy/app_profile.h"
+#include "extension/extension.h"
 
 #ifdef CONFIG_KSU_TOOLKIT_SUPPORT
 #include <linux/utsname.h> // utsname() and uts_sem
@@ -1105,6 +1106,97 @@ static int do_get_kernel_patch_implement(void __user *arg)
     return 0;
 }
 
+static int do_extension(void __user *arg)
+{
+    struct ksu_extension_cmd cmd;
+    u32 extension_id;
+    int ret;
+
+    if (copy_from_user(&cmd, arg, sizeof(cmd)))
+        return -EFAULT;
+
+    if (cmd.op == KSU_EXTENSION_ABI) {
+        if (cmd.id != KSU_EXTENSION_ABI_PROBE_ID)
+            return -EINVAL;
+        cmd.value = 0;
+        cmd.supported = 0;
+        cmd.api_version = KSU_EXTENSION_API_VERSION;
+        if (copy_to_user(arg, &cmd, sizeof(cmd)))
+            return -EFAULT;
+        return 0;
+    }
+
+    if (cmd.op == KSU_EXTENSION_ENUM) {
+        struct ksu_extension_desc desc;
+
+        if (cmd.id != KSU_EXTENSION_ABI_PROBE_ID)
+            return -EINVAL;
+        if (!cmd.user_ptr || cmd.value >> 32)
+            return -EINVAL;
+
+        ret = ksu_extension_enumerate((u32)cmd.value, &desc);
+        if (ret)
+            return ret;
+        if (copy_to_user((void __user *)(uintptr_t)cmd.user_ptr, &desc, sizeof(desc)))
+            return -EFAULT;
+
+        cmd.id = desc.id;
+        cmd.supported = desc.caps;
+        cmd.value = 0;
+        cmd.api_version = KSU_EXTENSION_API_VERSION;
+        if (copy_to_user(arg, &cmd, sizeof(cmd)))
+            return -EFAULT;
+        return 0;
+    }
+
+    extension_id = cmd.id;
+    if (extension_id >= KSU_EXTENSION_MAX)
+        return -EINVAL;
+
+    if (cmd.op == KSU_EXTENSION_IO)
+        return ksu_extension_ioctl(extension_id, cmd.api_version,
+                                   (void __user *)(uintptr_t)cmd.user_ptr);
+
+    if (cmd.op == KSU_EXTENSION_WIPE)
+        return ksu_extension_wipe(extension_id, cmd.api_version);
+
+    if (cmd.op == KSU_EXTENSION_SET) {
+        ret = ksu_extension_set(extension_id, cmd.api_version, cmd.value);
+        if (ret)
+            return ret;
+        {
+            u64 value = 0;
+            u32 caps = 0;
+
+            (void)ksu_extension_get(extension_id, KSU_EXTENSION_API_VERSION,
+                                    &value, &caps);
+            cmd.supported = caps;
+            cmd.value = value;
+            cmd.api_version = KSU_EXTENSION_API_VERSION;
+            if (copy_to_user(arg, &cmd, sizeof(cmd)))
+                return -EFAULT;
+        }
+        return 0;
+    }
+
+    {
+        u64 value = 0;
+        u32 caps = 0;
+
+        ret = ksu_extension_get(extension_id, cmd.api_version, &value, &caps);
+        if (ret)
+            return ret;
+        if (!(caps & KSU_FEATURE_FLAG_SUPPORTED))
+            return -EOPNOTSUPP;
+        cmd.value = value;
+        cmd.supported = caps;
+        cmd.api_version = KSU_EXTENSION_API_VERSION;
+        if (copy_to_user(arg, &cmd, sizeof(cmd)))
+            return -EFAULT;
+        return 0;
+    }
+}
+
 #ifdef CONFIG_KSU_SUSFS
 int ksu_handle_susfs_cmd(unsigned int cmd, void __user **arg)
 {
@@ -1506,11 +1598,17 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
         .perm_check = manager_or_root 
     },
     { 
+        .cmd = KSU_IOCTL_EXTENSION, 
+        .name = "EXTENSION", 
+        .handler = do_extension, 
+        .perm_check = manager_or_root 
+    },
+    { 
         .cmd = 0, 
         .name = NULL, 
         .handler = NULL, 
         .perm_check = NULL 
-    } // Sentine
+    } // Sentinel
 };
 // clang-format on
 

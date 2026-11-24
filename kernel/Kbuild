@@ -16,6 +16,7 @@ kernelsu-objs += feature/dynamic_manager.o
 kernelsu-objs += manager/apk_sign.o
 kernelsu-objs += manager/throne_tracker.o
 kernelsu-objs += manager/manager.o
+kernelsu-objs += extension/extension.o
 endif
 
 kernelsu-objs += compat/kernel_compat.o
