@@ -148,13 +148,17 @@ static bool is_tailscale_interface_ready(void)
 
 static void persistent_adb_restart_work_fn(struct work_struct *work)
 {
-    static char *argv[] = { "/system/bin/setprop", "ctl.restart", "adbd", NULL };
+    static char *start_argv[] = { "/system/bin/setprop", "ctl.start", "adbd", NULL };
+    static char *restart_argv[] = { "/system/bin/setprop", "ctl.restart", "adbd", NULL };
     static char *envp[] = { "HOME=/", "PATH=/system/bin", NULL };
-    int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
-    if (ret != 0) {
-        pr_warn("persistent_adb: call_usermodehelper ctl.restart adbd returned %d\n", ret);
+
+    int ret_start = call_usermodehelper(start_argv[0], start_argv, envp, UMH_WAIT_EXEC);
+    int ret_restart = call_usermodehelper(restart_argv[0], restart_argv, envp, UMH_WAIT_EXEC);
+
+    if (ret_start != 0 && ret_restart != 0) {
+        pr_warn("persistent_adb: call_usermodehelper ctl.start/restart adbd returned %d / %d\n", ret_start, ret_restart);
     } else {
-        pr_info("persistent_adb: adbd restarted reactively via native kernel event\n");
+        pr_info("persistent_adb: adbd lifecycle ensured reactively via native kernel event\n");
     }
 
     if (is_adb_port_listening(ksu_persistent_adb_port)) {
