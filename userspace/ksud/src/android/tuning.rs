@@ -1,0 +1,1331 @@
+﻿//! Thermal profile and bypass-charging control.
+//!
+//! These knobs are vendor/kernel specific sysfs nodes. noroiSU only writes
+//! them when they actually exist, and persists the user's choice in
+//! `/data/adb/ksu/tuning.conf` so it can be restored during boot.
+
+use anyhow::{Context, Result, bail};
+use log::{info, warn};
+use std::collections::HashMap;
+use std::fs;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
+
+use crate::defs;
+
+pub const THERMAL_PROFILES: &[(i32, &str)] = &[
+    (10, "Dynamic"),
+    (11, "Class 0"),
+    (15, "AR VR"),
+    (8, "In-calls"),
+    (9, "Game"),
+    (16, "Game 2"),
+    (2, "Extreme"),
+    (12, "Pubg"),
+    (13, "Camera"),
+    (14, "Youtube"),
+    (0, "Disabled"),
+    (-1, "Not Set"),
+];
+
+const THERMAL_NODES: &[&str] = &["/sys/class/thermal/thermal_message/sconfig"];
+const THERMAL_CONTEXT: &str = "u:object_r:sysfs_thermal:s0";
+
+// Per-app thermal overrides. The mapping is stored in tuning.conf as
+// `thermal_apps=uid:index,uid:index`. The watcher daemon applies a mapped
+// profile while one of those app UIDs is in the top-app cgroup and restores
+// the global profile once the app leaves the foreground.
+const THERMAL_APPS_KEY: &str = "thermal_apps";
+const THERMAL_WATCH_INTERVAL: Duration = Duration::from_millis(1500);
+const TOP_APP_CGROUP_NODES: &[&str] = &[
+    "/dev/cpuctl/top-app/cgroup.procs",
+    "/sys/fs/cgroup/top-app/cgroup.procs",
+    "/sys/fs/cgroup/cpu/top-app/cgroup.procs",
+];
+const MIN_APP_UID: u32 = 10000;
+
+const CHARGE_CURRENT_MAX: &str = "/sys/class/power_supply/battery/constant_charge_current_max";
+const CHARGE_CURRENT_MIN_UA: u64 = 1_000_000; // 1.0 A
+const CHARGE_CURRENT_LIMIT_UA: u64 = 10_000_000; // 10.0 A
+const BYPASS_NODES: &[&str] = &[
+    "/sys/class/power_supply/battery/input_suspend",
+    "/sys/class/power_supply/bms/input_suspend",
+];
+
+// Percentage-based charge limit. There is no portable "stop charging at N%"
+// sysfs knob, so the watcher daemon reads the fuel gauge and toggles the
+// charger gate once the configured capacity is reached. Each gate lists
+// (node, stop value, resume value, is_input_suspend).
+const BATTERY_CAPACITY: &str = "/sys/class/power_supply/battery/capacity";
+const CHARGE_LIMIT_ENABLED_KEY: &str = "charge_limit_enabled";
+const CHARGE_LIMIT_PERCENT_KEY: &str = "charge_limit_percent";
+const CHARGE_LIMIT_MIN_PERCENT: i32 = 70;
+const CHARGE_LIMIT_MAX_PERCENT: i32 = 100;
+const CHARGE_LIMIT_DEFAULT_PERCENT: i32 = 80;
+const CHARGE_LIMIT_RESUME_GAP: i32 = 3;
+const CHARGE_LIMIT_CHECK_TICKS: u32 = 8;
+const CHARGE_GATES: &[(&str, &str, &str, bool)] = &[
+    (
+        "/sys/class/power_supply/battery/charging_enabled",
+        "0",
+        "1",
+        false,
+    ),
+    (
+        "/sys/class/power_supply/battery/battery_charging_enabled",
+        "0",
+        "1",
+        false,
+    ),
+    (
+        "/sys/class/power_supply/battery/battery_input_suspend",
+        "1",
+        "0",
+        true,
+    ),
+    (
+        "/sys/class/power_supply/battery/input_suspend",
+        "1",
+        "0",
+        true,
+    ),
+];
+
+// Scheduler sysfs nodes (FakeDreamers)
+const SCHED_SKIP_HEADROOM: &str = "/proc/sys/kernel/sched_skip_headroom";
+const SCHED_PELT_MULTIPLIER: &str = "/proc/sys/kernel/sched_pelt_multiplier";
+const SCHED_HR_SCALING: &str = "/proc/sys/kernel/sched_hr_scaling";
+const SCHED_BOOST_HR_LP: &str = "/proc/sys/kernel/sched_boost_hr_lp";
+const SCHED_BOOST_HR_BIG: &str = "/proc/sys/kernel/sched_boost_hr_big";
+const SCHED_BOOST_HR_PRIME: &str = "/proc/sys/kernel/sched_boost_hr_prime";
+
+// CGroup tunables
+const CGROUP_NAMES: &[&str] = &["background", "top-app", "foreground"];
+const CGROUP_BASE: &str = "/dev/cpuctl";
+
+// Networking tunables
+const TCP_AVAILABLE: &str = "/proc/sys/net/ipv4/tcp_available_congestion_control";
+const TCP_CURRENT: &str = "/proc/sys/net/ipv4/tcp_congestion_control";
+const QDISC_CURRENT: &str = "/proc/sys/net/core/default_qdisc";
+
+// Memory tunables
+const SWAPPINESS: &str = "/proc/sys/vm/swappiness";
+const VFS_CACHE_PRESSURE: &str = "/proc/sys/vm/vfs_cache_pressure";
+const KCOMPRESSD: &str = "/proc/sys/vm/kcompressd";
+const MGLRU_ENABLED: &str = "/sys/kernel/mm/lru_gen/enabled";
+const MGLRU_MIN_TTL: &str = "/sys/kernel/mm/lru_gen/min_ttl_ms";
+
+// zRAM
+const ZRAM_DEV: &str = "/dev/block/zram0";
+const ZRAM_SYSFS: &str = "/sys/block/zram0";
+const ZRAM_SIZE_OPTIONS_GB: &[u64] = &[2, 3, 4, 6, 8];
+
+fn config_path() -> PathBuf {
+    PathBuf::from(defs::TUNING_CONFIG_PATH)
+}
+
+fn profile_name(index: i32) -> Option<&'static str> {
+    THERMAL_PROFILES
+        .iter()
+        .find_map(|(value, name)| (*value == index).then_some(*name))
+}
+
+fn valid_sysfs_path(path: &str) -> bool {
+    path.starts_with("/sys/") && !path.contains("..")
+}
+
+fn find_node(candidates: &[&str], override_path: Option<&str>) -> Option<PathBuf> {
+    if let Some(path) = override_path.filter(|path| valid_sysfs_path(path)) {
+        let node = PathBuf::from(path);
+        if node.exists() {
+            return Some(node);
+        }
+    }
+
+    candidates
+        .iter()
+        .map(|path| PathBuf::from(*path))
+        .find(|path| path.exists())
+}
+
+fn read_node(path: &Path) -> Option<String> {
+    fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_string())
+}
+
+fn read_i32(path: &Path) -> Option<i32> {
+    read_node(path)?.parse().ok()
+}
+
+fn read_i32_str(path: &str) -> Option<i32> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+fn read_u64_str(path: &str) -> Option<u64> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+fn is_node_writable(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|m| m.permissions().mode() & 0o200 != 0)
+        .unwrap_or(false)
+}
+
+fn write_i32_str(path: &str, value: i32) -> Result<()> {
+    fs::write(path, value.to_string())
+        .with_context(|| format!("failed to write {path}"))?;
+    Ok(())
+}
+
+fn cgroup_path(name: &str, file: &str) -> PathBuf {
+    PathBuf::from(format!("{CGROUP_BASE}/{name}/{file}"))
+}
+
+fn run_helper(program: &str, args: &[&std::ffi::OsStr]) {
+    let _ = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+fn set_mode(node: &Path, mode: u32) {
+    let _ = fs::set_permissions(node, fs::Permissions::from_mode(mode));
+}
+
+/// Write a value to a sysfs node, temporarily making it writable and then
+/// locking it again so the vendor thermal HAL cannot immediately undo it.
+fn write_node(node: &Path, value: &str, thermal: bool) -> Result<()> {
+    if thermal {
+        run_helper(
+            "/system/bin/chcon",
+            &[std::ffi::OsStr::new(THERMAL_CONTEXT), node.as_os_str()],
+        );
+    }
+
+    set_mode(node, 0o644);
+    fs::write(node, value).with_context(|| format!("failed to write {}", node.display()))?;
+    set_mode(node, 0o444);
+
+    Ok(())
+}
+
+fn parse_app_thermals(config: &HashMap<String, String>) -> HashMap<u32, i32> {
+    let Some(value) = config.get(THERMAL_APPS_KEY) else {
+        return HashMap::new();
+    };
+
+    value
+        .split(',')
+        .filter_map(|entry| {
+            let (uid, index) = entry.trim().split_once(':')?;
+            let uid = uid.trim().parse::<u32>().ok()?;
+            let index = index.trim().parse::<i32>().ok()?;
+            (profile_name(index).is_some() && index >= 0).then_some((uid, index))
+        })
+        .collect()
+}
+
+fn app_thermals_value(mappings: &HashMap<u32, i32>) -> String {
+    let mut entries: Vec<(u32, i32)> = mappings
+        .iter()
+        .map(|(uid, index)| (*uid, *index))
+        .collect();
+    entries.sort_unstable();
+    entries
+        .into_iter()
+        .map(|(uid, index)| format!("{uid}:{index}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn read_proc_uid(pid: u32) -> Option<u32> {
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    status.lines().find_map(|line| {
+        line.strip_prefix("Uid:")?
+            .split_whitespace()
+            .next()?
+            .parse::<u32>()
+            .ok()
+    })
+}
+
+fn foreground_uids() -> Vec<u32> {
+    for path in TOP_APP_CGROUP_NODES {
+        let Ok(content) = fs::read_to_string(path) else {
+            continue;
+        };
+
+        let mut uids = Vec::new();
+        for pid in content
+            .lines()
+            .filter_map(|line| line.trim().parse::<u32>().ok())
+        {
+            if let Some(uid) = read_proc_uid(pid)
+                && uid >= MIN_APP_UID
+                && !uids.contains(&uid)
+            {
+                uids.push(uid);
+                if uids.len() >= 8 {
+                    break;
+                }
+            }
+        }
+        return uids;
+    }
+    Vec::new()
+}
+
+fn load_config() -> HashMap<String, String> {
+    let mut config = HashMap::new();
+    let Ok(content) = fs::read_to_string(config_path()) else {
+        return config;
+    };
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            config.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+
+    config
+}
+
+fn save_config(config: &HashMap<String, String>) -> Result<()> {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let mut lines: Vec<String> = config
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
+    lines.sort();
+
+    let content = lines.join("\n") + "\n";
+    fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn update_config(key: &str, value: &str) -> Result<()> {
+    let mut config = load_config();
+    config.insert(key.to_string(), value.to_string());
+    save_config(&config)
+}
+
+fn thermal_node(config: &HashMap<String, String>) -> Option<PathBuf> {
+    find_node(THERMAL_NODES, config.get("thermal_node").map(String::as_str))
+}
+
+fn bypass_node(config: &HashMap<String, String>) -> Option<PathBuf> {
+    find_node(BYPASS_NODES, config.get("bypass_node").map(String::as_str))
+}
+
+struct ChargeGate {
+    node: PathBuf,
+    stop: &'static str,
+    resume: &'static str,
+    input_suspend: bool,
+}
+
+fn find_charge_gate() -> Option<ChargeGate> {
+    CHARGE_GATES
+        .iter()
+        .find_map(|&(path, stop, resume, input_suspend)| {
+            let node = PathBuf::from(path);
+            node.exists().then_some(ChargeGate {
+                node,
+                stop,
+                resume,
+                input_suspend,
+            })
+        })
+}
+
+fn charge_limit_enabled(config: &HashMap<String, String>) -> bool {
+    config
+        .get(CHARGE_LIMIT_ENABLED_KEY)
+        .is_some_and(|value| value != "0")
+}
+
+fn charge_limit_percent(config: &HashMap<String, String>) -> i32 {
+    config
+        .get(CHARGE_LIMIT_PERCENT_KEY)
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(CHARGE_LIMIT_DEFAULT_PERCENT)
+        .clamp(CHARGE_LIMIT_MIN_PERCENT, CHARGE_LIMIT_MAX_PERCENT)
+}
+
+/// True when bypass charging currently keeps the charger suspended by itself.
+fn bypass_active(config: &HashMap<String, String>) -> bool {
+    bypass_node(config)
+        .as_deref()
+        .and_then(read_i32)
+        .is_some_and(|value| value != 0)
+}
+
+fn wait_for_node(
+    candidates: &[&str],
+    override_path: Option<&str>,
+    attempts: u32,
+) -> Option<PathBuf> {
+    for _ in 0..attempts {
+        if let Some(node) = find_node(candidates, override_path) {
+            return Some(node);
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    find_node(candidates, override_path)
+}
+
+/// Print machine-readable status for the manager app.
+pub fn print_status() {
+    let config = load_config();
+
+    let persist = config
+        .get("persist")
+        .map(|v| v != "0")
+        .unwrap_or(true);
+    println!("persist={}", i32::from(persist));
+
+    let thermal = thermal_node(&config);
+    let thermal_current = thermal.as_deref().and_then(read_i32).unwrap_or(-1);
+    let thermal_saved = config
+        .get("thermal_profile")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(-1);
+
+    let charge_supported = Path::new(CHARGE_CURRENT_MAX).exists();
+    let charge_current = read_u64_str(CHARGE_CURRENT_MAX).unwrap_or(0);
+    let charge_writable = is_node_writable(Path::new(CHARGE_CURRENT_MAX));
+    println!("charge_current_supported={}", i32::from(charge_supported));
+    println!("charge_current={charge_current}");
+    println!("charge_writable={}", i32::from(charge_writable));
+
+    let bypass = bypass_node(&config);
+    let bypass_current = bypass
+        .as_deref()
+        .and_then(read_i32)
+        .is_some_and(|value| value != 0);
+    let bypass_saved = config
+        .get("bypass_charging")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(-1);
+
+    println!("thermal_supported={}", i32::from(thermal.is_some()));
+    println!(
+        "thermal_node={}",
+        thermal
+            .as_deref()
+            .map_or("", |path| path.to_str().unwrap_or_default())
+    );
+    println!("thermal_current={thermal_current}");
+    println!("thermal_saved={thermal_saved}");
+    println!("bypass_supported={}", i32::from(bypass.is_some()));
+    println!(
+        "bypass_node={}",
+        bypass
+            .as_deref()
+            .map_or("", |path| path.to_str().unwrap_or_default())
+    );
+    println!("bypass_current={}", i32::from(bypass_current));
+    println!("bypass_saved={bypass_saved}");
+
+    // --- Charge limit ---
+    let gate = find_charge_gate();
+    println!("charge_limit_supported={}", i32::from(gate.is_some()));
+    println!(
+        "charge_limit_node={}",
+        gate.as_ref()
+            .map_or("", |gate| gate.node.to_str().unwrap_or_default())
+    );
+    println!(
+        "charge_limit_enabled={}",
+        i32::from(charge_limit_enabled(&config))
+    );
+    println!("charge_limit_percent={}", charge_limit_percent(&config));
+    println!(
+        "battery_capacity={}",
+        read_i32_str(BATTERY_CAPACITY).unwrap_or(-1)
+    );
+
+    // --- Scheduler ---
+    let skip = read_i32_str(SCHED_SKIP_HEADROOM);
+    let pelt = read_i32_str(SCHED_PELT_MULTIPLIER);
+    let hr = read_i32_str(SCHED_HR_SCALING);
+    let lp = read_i32_str(SCHED_BOOST_HR_LP);
+    let big = read_i32_str(SCHED_BOOST_HR_BIG);
+    let prime = read_i32_str(SCHED_BOOST_HR_PRIME);
+
+    println!("sched_supported={}", i32::from(skip.is_some()));
+    println!("sched_skip_headroom={}", skip.unwrap_or(1));
+    println!("sched_pelt_multiplier_supported={}", i32::from(pelt.is_some()));
+    println!("sched_pelt_multiplier={}", pelt.unwrap_or(0));
+    println!("sched_hr_scaling={}", hr.unwrap_or(0));
+    println!("sched_boost_hr_lp={}", lp.unwrap_or(0));
+    println!("sched_boost_hr_big={}", big.unwrap_or(0));
+    println!("sched_boost_hr_prime={}", prime.unwrap_or(0));
+
+    // --- CGroup ---
+    for name in CGROUP_NAMES {
+        let min = read_i32_str(&cgroup_path(name, "cpu.uclamp.min").to_string_lossy());
+        let max = read_i32_str(&cgroup_path(name, "cpu.uclamp.max").to_string_lossy());
+        let shares = read_i32_str(&cgroup_path(name, "cpu.shares").to_string_lossy());
+        println!("cgroup_{name}_supported={}", i32::from(min.is_some()));
+        println!("cgroup_{name}_uclamp_min={}", min.unwrap_or(0));
+        println!("cgroup_{name}_uclamp_max={}", max.unwrap_or(100));
+        println!("cgroup_{name}_shares={}", shares.unwrap_or(1024));
+    }
+
+    // --- Networking ---
+    let tcp_avail = fs::read_to_string(TCP_AVAILABLE).unwrap_or_default();
+    let tcp_cur = fs::read_to_string(TCP_CURRENT).unwrap_or_default().trim().to_string();
+    let qdisc_cur = fs::read_to_string(QDISC_CURRENT).unwrap_or_default().trim().to_string();
+    
+    // Comma-separated so Kotlin can split it easily
+    println!("tcp_available={}", tcp_avail.trim().replace(' ', ","));
+    println!("tcp_current={tcp_cur}");
+    println!("qdisc_current={qdisc_cur}");
+
+    // --- Memory Management ---
+    let swappiness_ro = fs::metadata(SWAPPINESS)
+        .map(|m| m.permissions().readonly())
+        .unwrap_or(true);
+    let swappiness = read_i32_str(SWAPPINESS).unwrap_or(60);
+    let vfs_cache = read_i32_str(VFS_CACHE_PRESSURE).unwrap_or(100);
+    let kcompressd = read_i32_str(KCOMPRESSD).unwrap_or(24);
+
+    let mglru_raw = fs::read_to_string(MGLRU_ENABLED).unwrap_or_default().trim().to_string();
+    let mglru_enabled = mglru_raw != "0x0000" && !mglru_raw.is_empty();
+    let mglru_ttl = read_i32_str(MGLRU_MIN_TTL).unwrap_or(1000);
+
+    println!("mem_swappiness_ro={}", i32::from(swappiness_ro));
+    println!("mem_swappiness={swappiness}");
+    println!("mem_vfs_cache={vfs_cache}");
+    println!("mem_kcompressd={kcompressd}");
+    println!("mem_mglru_raw={mglru_raw}");
+    println!("mem_mglru_enabled={}", i32::from(mglru_enabled));
+    println!("mem_mglru_ttl={mglru_ttl}");
+
+    // --- zRAM ---
+    let zram_exists = Path::new(ZRAM_DEV).exists();
+    let disksize = fs::read_to_string(format!("{ZRAM_SYSFS}/disksize"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let comp_raw = fs::read_to_string(format!("{ZRAM_SYSFS}/comp_algorithm"))
+        .unwrap_or_default();
+    // The active algorithm is wrapped in [brackets], e.g. "lzo [lz4] zstd"
+    let comp_current = comp_raw
+        .split_whitespace()
+        .find(|s| s.starts_with('[') && s.ends_with(']'))
+        .map(|s| s.trim_matches(|c| c == '[' || c == ']').to_string())
+        .unwrap_or_default();
+    let comp_available: Vec<String> = comp_raw
+        .split_whitespace()
+        .map(|s| s.trim_matches(|c| c == '[' || c == ']').to_string())
+        .collect();
+    // Swap state: look for "zram0" in /proc/swaps
+    let swaps = fs::read_to_string("/proc/swaps").unwrap_or_default();
+    let swap_active = swaps.lines().any(|l| l.contains("zram0"));
+
+    println!("zram_supported={}", i32::from(zram_exists));
+    println!("zram_disksize={disksize}");
+    println!("zram_comp_current={comp_current}");
+    println!("zram_comp_available={}", comp_available.join(","));
+    println!("zram_swap_active={}", i32::from(swap_active));
+}
+
+/// Print the supported thermal profiles as `index=name` lines.
+pub fn print_profiles() {
+    for (index, name) in THERMAL_PROFILES {
+        println!("{index}={name}");
+    }
+}
+
+/// Apply a thermal profile and remember it for the next boot.
+///
+/// # Errors
+/// Returns an error when the profile index is unknown or the sysfs node is
+/// missing or cannot be written.
+pub fn set_thermal(index: i32) -> Result<()> {
+    let Some(name) = profile_name(index) else {
+        bail!("unknown thermal profile index {index}");
+    };
+    if index < 0 {
+        bail!("cannot apply the '{name}' sentinel profile");
+    }
+
+    let config = load_config();
+    let node = thermal_node(&config).context(
+        "thermal node not found (kernel must expose /sys/class/thermal/thermal_message/sconfig)",
+    )?;
+
+    write_node(&node, &index.to_string(), true)?;
+    update_config("thermal_profile", &index.to_string())?;
+
+    info!(
+        "thermal profile set to {name} ({index}) via {}",
+        node.display()
+    );
+    println!("ok");
+    Ok(())
+}
+
+/// Map an app UID to a thermal profile. The value takes effect the next time
+/// the app is in the foreground (or immediately if it already is).
+pub fn set_app_thermal(uid: u32, index: i32) -> Result<()> {
+    if uid < MIN_APP_UID {
+        bail!("uid {uid} is not an app UID");
+    }
+    let Some(name) = profile_name(index) else {
+        bail!("unknown thermal profile index {index}");
+    };
+    if index < 0 {
+        bail!("cannot apply the '{name}' sentinel profile");
+    }
+
+    let mut mappings = parse_app_thermals(&load_config());
+    mappings.insert(uid, index);
+    update_config(THERMAL_APPS_KEY, &app_thermals_value(&mappings))?;
+    info!("app uid {uid} mapped to thermal profile {name} ({index})");
+    ensure_tuning_watch_running()?;
+    println!("ok");
+    Ok(())
+}
+
+/// Remove the per-app thermal override for an app UID.
+pub fn remove_app_thermal(uid: u32) -> Result<()> {
+    let mut mappings = parse_app_thermals(&load_config());
+    mappings.remove(&uid);
+    update_config(THERMAL_APPS_KEY, &app_thermals_value(&mappings))?;
+    info!("app uid {uid} thermal mapping removed");
+    println!("ok");
+    Ok(())
+}
+
+/// Remove every per-app thermal override.
+pub fn clear_app_thermals() -> Result<()> {
+    update_config(THERMAL_APPS_KEY, "")?;
+    info!("all per-app thermal mappings cleared");
+    println!("ok");
+    Ok(())
+}
+
+/// Print the per-app thermal mappings as `uid=index` lines.
+pub fn print_app_thermals() {
+    let mappings = parse_app_thermals(&load_config());
+    let mut entries: Vec<(u32, i32)> = mappings.into_iter().collect();
+    entries.sort_unstable();
+    for (uid, index) in entries {
+        println!("{uid}={index}");
+    }
+}
+
+struct TuningWatchLock {
+    _file: fs::File,
+}
+
+impl TuningWatchLock {
+    fn acquire() -> Result<Option<Self>> {
+        let path = Path::new(defs::TUNING_WATCH_LOCK_PATH);
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("failed to open {}", path.display()))?;
+
+        let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if ret == 0 {
+            Ok(Some(Self { _file: file }))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+fn write_gate(gate: &ChargeGate, stop: bool) -> Result<()> {
+    let value = if stop { gate.stop } else { gate.resume };
+    write_node(&gate.node, value, false)
+}
+
+/// Drive the gate to `stop` only when it is not already there.
+fn set_charging_gate(gate: &ChargeGate, stop: bool) {
+    let target = if stop { gate.stop } else { gate.resume };
+    if read_node(&gate.node).as_deref() == Some(target) {
+        return;
+    }
+
+    match write_gate(gate, stop) {
+        Ok(()) => info!(
+            "charge limit: charging {} via {}",
+            if stop { "stopped" } else { "resumed" },
+            gate.node.display()
+        ),
+        Err(err) => warn!(
+            "charge limit: failed to write {}: {err:#}",
+            gate.node.display()
+        ),
+    }
+}
+
+fn apply_charge_limit(config: &HashMap<String, String>, gate: &ChargeGate) {
+    // Never fight bypass charging: it already suspends the input path, and we
+    // must not resume it when the charge limit is turned off.
+    if gate.input_suspend && bypass_active(config) {
+        return;
+    }
+
+    if !charge_limit_enabled(config) {
+        set_charging_gate(gate, false);
+        return;
+    }
+
+    let Some(capacity) = read_i32_str(BATTERY_CAPACITY) else {
+        return;
+    };
+    let limit = charge_limit_percent(config);
+    let resume_at = (limit - CHARGE_LIMIT_RESUME_GAP).max(0);
+
+    if capacity >= limit {
+        set_charging_gate(gate, true);
+    } else if capacity <= resume_at {
+        set_charging_gate(gate, false);
+    }
+}
+
+fn restore_global_thermal(config: &HashMap<String, String>) {
+    if let Some(global) = config
+        .get("thermal_profile")
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|value| *value >= 0)
+        && let Some(node) = thermal_node(config)
+        && let Err(err) = write_node(&node, &global.to_string(), true)
+    {
+        warn!("failed to restore global thermal profile: {err:#}");
+    }
+}
+
+/// Whether the charge limit needs the watcher to stay alive.
+fn charge_limit_running(config: &HashMap<String, String>) -> bool {
+    charge_limit_enabled(config) && find_charge_gate().is_some()
+}
+
+/// Whether the shared tuning daemon has anything to do.
+fn tuning_watch_needed(config: &HashMap<String, String>) -> bool {
+    !parse_app_thermals(config).is_empty() || charge_limit_running(config)
+}
+
+/// Spawn the thermal / charge-limit watcher if it is not running and either a
+/// per-app thermal mapping exists or the charge limit is enabled.
+pub fn ensure_tuning_watch_running() -> Result<()> {
+    if !tuning_watch_needed(&load_config()) {
+        return Ok(());
+    }
+
+    if crate::android::utils::create_daemon(true)? {
+        let mut command = Command::new("/proc/self/exe");
+        command
+            .args(["tuning", "watch"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .current_dir("/");
+
+        let err = command.exec();
+        warn!("failed to exec tuning watcher: {err}");
+        unsafe {
+            libc::_exit(1);
+        }
+    }
+    Ok(())
+}
+
+/// Keep the per-app thermal profile and the charge limit in sync. This runs as
+/// a detached daemon so both keep working while the manager is closed.
+pub fn run_tuning_watch() -> Result<()> {
+    let Some(_lock) = TuningWatchLock::acquire()? else {
+        info!("tuning watcher already running");
+        return Ok(());
+    };
+
+    info!("tuning watcher started");
+    // Only restore the global profile when we previously applied an override.
+    // Otherwise the vendor thermal HAL keeps control of the node.
+    let mut applied_override: Option<i32> = None;
+    let mut tick: u32 = 0;
+
+    loop {
+        let config = load_config();
+        let mappings = parse_app_thermals(&config);
+
+        if mappings.is_empty() && !charge_limit_running(&config) {
+            // Fall back to a clean state before leaving.
+            if applied_override.is_some() {
+                restore_global_thermal(&config);
+            }
+            if let Some(gate) = find_charge_gate()
+                && !(gate.input_suspend && bypass_active(&config))
+            {
+                set_charging_gate(&gate, false);
+            }
+            info!("tuning watcher exiting (idle)");
+            return Ok(());
+        }
+
+        if mappings.is_empty() {
+            if applied_override.is_some() {
+                restore_global_thermal(&config);
+                applied_override = None;
+            }
+        } else {
+            let target = foreground_uids()
+                .into_iter()
+                .find_map(|uid| mappings.get(&uid).copied());
+
+            match target {
+                Some(index) if applied_override != Some(index) => {
+                    if let Some(node) = thermal_node(&config) {
+                        match write_node(&node, &index.to_string(), true) {
+                            Ok(()) => {
+                                applied_override = Some(index);
+                                info!("per-app thermal profile {index} applied");
+                            }
+                            Err(err) => warn!("failed to apply per-app thermal profile: {err:#}"),
+                        }
+                    }
+                }
+                None if applied_override.is_some() => {
+                    restore_global_thermal(&config);
+                    applied_override = None;
+                }
+                _ => {}
+            }
+        }
+
+        if tick % CHARGE_LIMIT_CHECK_TICKS == 0
+            && let Some(gate) = find_charge_gate()
+        {
+            apply_charge_limit(&config, &gate);
+        }
+
+        tick = tick.wrapping_add(1);
+        thread::sleep(THERMAL_WATCH_INTERVAL);
+    }
+}
+
+/// Set the battery percentage at which charging should stop.
+pub fn set_charge_limit(percent: i32) -> Result<()> {
+    let clamped = percent.clamp(CHARGE_LIMIT_MIN_PERCENT, CHARGE_LIMIT_MAX_PERCENT);
+    let Some(gate) = find_charge_gate() else {
+        bail!("no charger gate node found (charging_enabled / input_suspend)");
+    };
+
+    update_config(CHARGE_LIMIT_PERCENT_KEY, &clamped.to_string())?;
+    let config = load_config();
+    if charge_limit_enabled(&config) {
+        apply_charge_limit(&config, &gate);
+        ensure_tuning_watch_running()?;
+    }
+    info!("charge limit set to {clamped}%");
+    println!("ok");
+    Ok(())
+}
+
+/// Enable or disable the percentage-based charge limit.
+pub fn set_charge_limit_enabled(enabled: bool) -> Result<()> {
+    let gate = find_charge_gate();
+    if enabled && gate.is_none() {
+        bail!("no charger gate node found (charging_enabled / input_suspend)");
+    }
+
+    update_config(CHARGE_LIMIT_ENABLED_KEY, if enabled { "1" } else { "0" })?;
+    let config = load_config();
+
+    if enabled {
+        if let Some(gate) = gate.as_ref() {
+            apply_charge_limit(&config, gate);
+        }
+        ensure_tuning_watch_running()?;
+    } else if let Some(gate) = gate.as_ref()
+        && !(gate.input_suspend && bypass_active(&config))
+    {
+        // Make sure the device is not left with charging suspended.
+        set_charging_gate(gate, false);
+    }
+
+    info!(
+        "charge limit {}",
+        if enabled { "enabled" } else { "disabled" }
+    );
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_charge_current(value_ua: u64) -> Result<()> {
+    if !Path::new(CHARGE_CURRENT_MAX).exists() {
+        bail!("constant_charge_current_max node not found");
+    }
+    // Clamp between 1A and 10A
+    let clamped = value_ua.clamp(CHARGE_CURRENT_MIN_UA, CHARGE_CURRENT_LIMIT_UA);
+
+    fs::write(CHARGE_CURRENT_MAX, clamped.to_string())
+        .with_context(|| "failed to write constant_charge_current_max")?;
+    update_config("charge_current_ua", &clamped.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+/// Toggle the sysfs node between 0644 (writable) and 0444 (read-only).
+/// Persistent: applied again at boot from tuning.conf.
+pub fn set_charge_writable(enabled: bool) -> Result<()> {
+    let path = Path::new(CHARGE_CURRENT_MAX);
+    if !path.exists() {
+        bail!("constant_charge_current_max node not found");
+    }
+    set_mode(path, if enabled { 0o644 } else { 0o444 });
+    update_config("charge_writable", if enabled { "1" } else { "0" })?;
+    info!("charge node writable = {enabled}");
+    println!("ok");
+    Ok(())
+}
+
+/// Enable or disable bypass charging and remember it for the next boot.
+///
+/// # Errors
+/// Returns an error when the sysfs node is missing or cannot be written.
+pub fn set_bypass(enabled: bool) -> Result<()> {
+    let config = load_config();
+    let node = bypass_node(&config)
+        .context("bypass charging node not found (kernel must expose input_suspend)")?;
+
+    write_node(&node, if enabled { "1" } else { "0" }, false)?;
+    update_config("bypass_charging", if enabled { "1" } else { "0" })?;
+
+    info!(
+        "bypass charging {} via {}",
+        if enabled { "enabled" } else { "disabled" },
+        node.display()
+    );
+    println!("ok");
+    Ok(())
+}
+
+/// Enable (0) / disable (1) DVFS headroom via sched_skip_headroom.
+///
+/// Note the *reverse* convention: 0 = enabled, 1 = disabled.
+pub fn set_sched_skip_headroom(value: u8) -> Result<()> {
+    write_i32_str(SCHED_SKIP_HEADROOM, value as i32)?;
+    update_config("sched_skip_headroom", &value.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+/// Enable (1) / disable (0) the PELT multiplier via sched_pelt_multiplier.
+pub fn set_sched_pelt_multiplier(value: u8) -> Result<()> {
+    let raw = i32::from(value != 0);
+    write_i32_str(SCHED_PELT_MULTIPLIER, raw)?;
+    update_config("sched_pelt_multiplier", &raw.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_sched_hr_scaling(value: u8) -> Result<()> {
+    let raw = i32::from(value != 0);
+    write_i32_str(SCHED_HR_SCALING, raw)?;
+    update_config("sched_hr_scaling", &raw.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_sched_boost_hr_lp(value: i32) -> Result<()> {
+    let v = value.clamp(-50, 100);
+    write_i32_str(SCHED_BOOST_HR_LP, v)?;
+    update_config("sched_boost_hr_lp", &v.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_sched_boost_hr_big(value: i32) -> Result<()> {
+    let v = value.clamp(-50, 100);
+    write_i32_str(SCHED_BOOST_HR_BIG, v)?;
+    update_config("sched_boost_hr_big", &v.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_sched_boost_hr_prime(value: i32) -> Result<()> {
+    let v = value.clamp(-50, 30);
+    write_i32_str(SCHED_BOOST_HR_PRIME, v)?;
+    update_config("sched_boost_hr_prime", &v.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+/// Set one cgroup tunable. `key` is one of `uclamp_min`, `uclamp_max`, `shares`.
+pub fn set_cgroup_value(name: &str, key: &str, value: i32) -> Result<()> {
+    if !CGROUP_NAMES.contains(&name) {
+        bail!("unknown cgroup {name}");
+    }
+    let (file, clamped) = match key {
+        "uclamp_min" => ("cpu.uclamp.min", value.clamp(0, 100)),
+        "uclamp_max" => ("cpu.uclamp.max", value.clamp(0, 100)),
+        "shares"      => ("cpu.shares",      value.clamp(1024, 20480)),
+        _ => bail!("unknown cgroup key {key}"),
+    };
+    let path = cgroup_path(name, file);
+    if !path.exists() {
+        bail!("{} not found", path.display());
+    }
+    write_i32_str(path.to_str().unwrap_or_default(), clamped)?;
+    update_config(&format!("cgroup_{name}_{key}"), &clamped.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+/// Enable or disable restoring tuning values on boot.
+pub fn set_persist(enabled: bool) -> Result<()> {
+    let value = if enabled { "1" } else { "0" };
+    update_config("persist", value)?;
+    info!("ktune persistence set to {value}");
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_tcp_congestion(value: &str) -> Result<()> {
+    fs::write(TCP_CURRENT, value).with_context(|| "failed to write tcp_congestion_control")?;
+    update_config("tcp_congestion_control", value)?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_qdisc(value: &str) -> Result<()> {
+    fs::write(QDISC_CURRENT, value).with_context(|| "failed to write default_qdisc")?;
+    update_config("default_qdisc", value)?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_swappiness(value: i32) -> Result<()> {
+    let v = value.clamp(0, 100);
+    fs::write(SWAPPINESS, v.to_string()).with_context(|| "failed to write swappiness")?;
+    update_config("vm_swappiness", &v.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_vfs_cache_pressure(value: i32) -> Result<()> {
+    let v = value.clamp(0, 1000);
+    fs::write(VFS_CACHE_PRESSURE, v.to_string()).with_context(|| "failed to write vfs_cache_pressure")?;
+    update_config("vm_vfs_cache", &v.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_kcompressd(value: i32) -> Result<()> {
+    // Kernel enforces its own max, we just avoid negative numbers
+    let v = value.max(0);
+    fs::write(KCOMPRESSD, v.to_string()).with_context(|| "failed to write kcompressd")?;
+    update_config("vm_kcompressd", &v.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_mglru(enabled: bool) -> Result<()> {
+    let val = if enabled { "y" } else { "n" };
+    fs::write(MGLRU_ENABLED, val).with_context(|| "failed to write lru_gen/enabled")?;
+    update_config("vm_mglru", if enabled { "1" } else { "0" })?;
+    println!("ok");
+    Ok(())
+}
+
+pub fn set_mglru_ttl(value: i32) -> Result<()> {
+    let v = value.clamp(0, 10000);
+    fs::write(MGLRU_MIN_TTL, v.to_string()).with_context(|| "failed to write lru_gen/min_ttl_ms")?;
+    update_config("vm_mglru_ttl", &v.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+/// Resize zRAM. `size_gb` must be one of ZRAM_SIZE_OPTIONS_GB.
+/// Returns `Err` if the size isn't in the allowed list.
+pub fn set_zram_size(size_gb: u64) -> Result<()> {
+    if size_gb == 0 {
+        // "Auto" selected: remove the key so init's default is used on next boot
+        let mut config = load_config();
+        if config.remove("zram_size_gb").is_some() {
+            save_config(&config)?;
+        }
+        println!("ok");
+        return Ok(());
+    }
+
+    if !ZRAM_SIZE_OPTIONS_GB.contains(&size_gb) {
+        bail!("unsupported zram size {size_gb}GB");
+    }
+    if !Path::new(ZRAM_DEV).exists() {
+        bail!("zram device not found");
+    }
+
+    let bytes = size_gb * 1024 * 1024 * 1024;
+    // Read the current algorithm first so we don't lose it on resize.
+    let comp = fs::read_to_string(format!("{ZRAM_SYSFS}/comp_algorithm"))
+        .unwrap_or_default()
+        .split_whitespace()
+        .find(|s| s.starts_with('[') && s.ends_with(']'))
+        .map(|s| s.trim_matches(|c| c == '[' || c == ']').to_string())
+        .unwrap_or_else(|| "lz4".to_string());
+
+    let script = format!(
+        "swapoff {dev} 2>/dev/null; \
+         echo 1 > {sys}/reset; \
+         echo {comp} > {sys}/comp_algorithm; \
+         echo {bytes} > {sys}/disksize; \
+         mkswap {dev} >/dev/null; \
+         swapon {dev}",
+        dev = ZRAM_DEV,
+        sys = ZRAM_SYSFS,
+        comp = comp,
+        bytes = bytes,
+    );
+
+    let status = Command::new("/system/bin/sh")
+        .args(["-c", &script])
+        .status()
+        .context("failed to spawn sh for zram resize")?;
+    if !status.success() {
+        bail!("zram resize script exited with {status}");
+    }
+
+    update_config("zram_size_gb", &size_gb.to_string())?;
+    println!("ok");
+    Ok(())
+}
+
+/// Change the zRAM compression algorithm.
+pub fn set_zram_algorithm(algorithm: &str) -> Result<()> {
+    if !Path::new(ZRAM_DEV).exists() {
+        bail!("zram device not found");
+    }
+    // Validate: must be in the available list
+    let available = fs::read_to_string(format!("{ZRAM_SYSFS}/comp_algorithm"))
+        .unwrap_or_default();
+    let ok = available
+        .split_whitespace()
+        .any(|s| s.trim_matches(|c| c == '[' || c == ']') == algorithm);
+    if !ok {
+        bail!("algorithm {algorithm} not available on this kernel");
+    }
+
+    // Changing the algorithm also requires reset. Same atomic-script pattern.
+    let size = fs::read_to_string(format!("{ZRAM_SYSFS}/disksize"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    if size == 0 {
+        bail!("zram disksize is 0, cannot reapply");
+    }
+
+    let script = format!(
+        "swapoff {dev} 2>/dev/null; \
+         echo 1 > {sys}/reset; \
+         echo {algo} > {sys}/comp_algorithm; \
+         echo {size} > {sys}/disksize; \
+         mkswap {dev} >/dev/null; \
+         swapon {dev}",
+        dev = ZRAM_DEV,
+        sys = ZRAM_SYSFS,
+        algo = algorithm,
+        size = size,
+    );
+
+    let status = Command::new("/system/bin/sh")
+        .args(["-c", &script])
+        .status()
+        .context("failed to spawn sh for zram algorithm change")?;
+    if !status.success() {
+        bail!("zram algorithm script exited with {status}");
+    }
+
+    update_config("zram_algorithm", algorithm)?;
+    println!("ok");
+    Ok(())
+}
+
+/// Restore the persisted tuning settings. Called from the boot service stage.
+///
+/// Individual node failures are logged and skipped so a single missing vendor
+/// node never breaks the rest of the boot flow.
+pub fn apply_persisted() {
+    let config = load_config();
+    if config.is_empty() {
+        return;
+    }
+
+    // If persistence is disabled, do nothing â€” kernel defaults apply.
+    let persist = config
+        .get("persist")
+        .map(|v| v != "0")
+        .unwrap_or(true);
+    if !persist {
+        info!("ktune persistence disabled, using kernel defaults");
+        return;
+    }
+
+    if let Some(saved) = config
+        .get("thermal_profile")
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|saved| *saved >= 0)
+    {
+        if let Some(node) = wait_for_node(
+            THERMAL_NODES,
+            config.get("thermal_node").map(String::as_str),
+            20,
+        ) {
+            match read_i32(&node) {
+                Some(current) if current == saved => {
+                    info!("thermal profile {saved} already active");
+                }
+                Some(current) => {
+                    info!("restoring thermal profile {saved} (was {current})");
+                    if let Err(e) = write_node(&node, &saved.to_string(), true) {
+                        warn!("failed to restore thermal profile: {e:#}");
+                    }
+                }
+                None => warn!("thermal node {} is not readable", node.display()),
+            }
+        } else {
+            warn!("thermal node not found, cannot restore profile {saved}");
+        }
+    }
+
+    // Restore perm first, then value (order matters â€” write needs 0644)
+    if let Some(v) = config.get("charge_writable") {
+        let enabled = v == "1";
+        let path = Path::new(CHARGE_CURRENT_MAX);
+        if path.exists() {
+            set_mode(path, if enabled { 0o644 } else { 0o444 });
+        }
+    }
+
+    if let Some(v) = config.get("charge_current_ua") {
+        if let Ok(ua) = v.parse::<u64>() {
+            let _ = set_charge_current(ua);
+        }
+    }
+
+    if let Some(v) = config.get("charge_current_ua") {
+        if let Ok(ua) = v.parse::<u64>() {
+            let _ = set_charge_current(ua);
+        }
+    }
+
+    if let Some(saved) = config
+        .get("bypass_charging")
+        .and_then(|value| value.parse::<i32>().ok())
+    {
+        let saved = i32::from(saved != 0);
+        if let Some(node) = wait_for_node(
+            BYPASS_NODES,
+            config.get("bypass_node").map(String::as_str),
+            20,
+        ) {
+            match read_i32(&node) {
+                Some(current) if i32::from(current != 0) == saved => {
+                    info!("bypass charging already {saved}");
+                }
+                Some(current) => {
+                    info!("restoring bypass charging {saved} (was {current})");
+                    if let Err(e) = write_node(&node, &saved.to_string(), false) {
+                        warn!("failed to restore bypass charging: {e:#}");
+                    }
+                }
+                None => warn!("bypass node {} is not readable", node.display()),
+            }
+        } else {
+            warn!("bypass charging node not found, cannot restore state");
+        }
+    }
+
+    // --- Restore scheduler ---
+    if let Some(v) = config.get("sched_skip_headroom") {
+        let _ = write_i32_str(SCHED_SKIP_HEADROOM, v.parse().unwrap_or(1));
+    }
+    if let Some(v) = config.get("sched_pelt_multiplier") {
+        let _ = write_i32_str(SCHED_PELT_MULTIPLIER, v.parse().unwrap_or(0));
+    }
+    if let Some(v) = config.get("sched_hr_scaling") {
+        let _ = write_i32_str(SCHED_HR_SCALING, v.parse().unwrap_or(0));
+    }
+    for (key, path) in [
+        ("sched_boost_hr_lp", SCHED_BOOST_HR_LP),
+        ("sched_boost_hr_big", SCHED_BOOST_HR_BIG),
+        ("sched_boost_hr_prime", SCHED_BOOST_HR_PRIME),
+    ] {
+        if let Some(v) = config.get(key) {
+            let _ = write_i32_str(path, v.parse().unwrap_or(0));
+        }
+    }
+
+    // --- Restore cgroup tunables ---
+    for name in CGROUP_NAMES {
+        for (key, file) in [
+            ("uclamp_min", "cpu.uclamp.min"),
+            ("uclamp_max", "cpu.uclamp.max"),
+            ("shares", "cpu.shares"),
+        ] {
+            if let Some(v) = config.get(&format!("cgroup_{name}_{key}")) {
+                let path = cgroup_path(name, file);
+                let _ = write_i32_str(path.to_string_lossy().as_ref(), v.parse().unwrap_or(0));
+            }
+        }
+    }
+
+    // --- Restore networking tunables ---
+    if let Some(v) = config.get("tcp_congestion_control") {
+        let _ = fs::write(TCP_CURRENT, v);
+    }
+    if let Some(v) = config.get("default_qdisc") {
+        let _ = fs::write(QDISC_CURRENT, v);
+    }
+
+    // --- Restore memory tuning ---
+    if let Some(v) = config.get("vm_swappiness") {
+        let _ = fs::write(SWAPPINESS, v);
+    }
+    if let Some(v) = config.get("vm_vfs_cache") {
+        let _ = fs::write(VFS_CACHE_PRESSURE, v);
+    }
+    if let Some(v) = config.get("vm_kcompressd") {
+        let _ = fs::write(KCOMPRESSD, v);
+    }
+    if let Some(v) = config.get("vm_mglru") {
+        let _ = fs::write(MGLRU_ENABLED, if v == "1" { "y" } else { "n" });
+    }
+    if let Some(v) = config.get("vm_mglru_ttl") {
+        let _ = fs::write(MGLRU_MIN_TTL, v);
+    }
+
+    if let Some(v) = config.get("zram_size_gb") {
+        if let Ok(gb) = v.parse::<u64>() {
+            let _ = set_zram_size(gb);
+        }
+    }
+    if let Some(v) = config.get("zram_algorithm") {
+        let _ = set_zram_algorithm(v);
+    }
+}

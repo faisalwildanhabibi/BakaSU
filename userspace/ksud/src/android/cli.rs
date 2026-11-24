@@ -174,6 +174,126 @@ enum Commands {
         #[command(subcommand)]
         command: Initrc,
     },
+
+    /// Manage thermal profile, charge limit and bypass charging
+    Tuning {
+        #[command(subcommand)]
+        command: TuningCmd,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum TuningCmd {
+    /// Show current thermal / bypass charging status
+    Status,
+
+    /// List supported thermal profiles
+    List,
+
+    /// Apply a thermal profile and remember it for the next boot
+    Thermal {
+        /// profile index (see `ksud tuning list`)
+        index: i32,
+    },
+
+    /// Per-app thermal: map an app UID to a thermal profile
+    AppThermal {
+        /// app UID
+        uid: u32,
+        /// profile index (see `ksud tuning list`)
+        index: i32,
+    },
+
+    /// Per-app thermal: remove an app mapping
+    AppThermalRemove {
+        /// app UID
+        uid: u32,
+    },
+
+    /// Per-app thermal: clear every mapping
+    AppThermalClear,
+
+    /// Per-app thermal: list mappings as uid=index
+    AppThermalList,
+
+    /// Run the thermal / charge-limit watcher (internal daemon)
+    #[command(hide = true)]
+    Watch,
+
+    /// Charging: set the battery percentage at which charging stops (70-100)
+    ChargeLimit { percent: i32 },
+
+    /// Charging: enable (1) or disable (0) the percentage-based charge limit
+    ChargeLimitToggle { value: u8 },
+
+    /// Charging: toggle sysfs writable mode (1=0644, 0=0444)
+    ChargeWritable { value: u8 },
+
+    /// Charging: set the constant charge current in microamps
+    ChargeCurrent { ua: u64 },
+
+    /// Enable (1) or disable (0) bypass charging and remember it for the next boot
+    Bypass {
+        /// 1 to enable, 0 to disable
+        value: u8,
+    },
+
+    /// Toggle DVFS headroom (0 = enable, 1 = disable)
+    SchedSkipHeadroom { value: u8 },
+
+    /// Toggle PELT multiplier (0 = disable, 1 = enable)
+    SchedPeltMultiplier { value: u8 },
+
+    /// Toggle DVFS headroom scaling (0 = off, 1 = on)
+    SchedHrScaling { value: u8 },
+
+    /// Little cores scaling (-50..100)
+    SchedBoostHrLp { value: i32 },
+
+    /// Perf cores scaling (-50..100)
+    SchedBoostHrBig { value: i32 },
+
+    /// Prime core scaling (-50..30)
+    SchedBoostHrPrime { value: i32 },
+
+    /// Set a cgroup tunable
+    Cgroup {
+        /// background | top-app | foreground
+        name: String,
+        /// uclamp_min | uclamp_max | shares
+        key: String,
+        value: i32,
+    },
+
+    /// Enable (1) or disable (0) restoring tuning values across reboots
+    Persist { value: u8 },
+
+    /// Set TCP Congestion Algorithm
+    TcpCongestion { value: String },
+
+    /// Set Queueing Discipline
+    Qdisc { value: String },
+
+    /// Memory: Set swappiness (0-100)
+    Swappiness { value: i32 },
+    /// Memory: Set vfs_cache_pressure
+    VfsCache { value: i32 },
+    /// Memory: Set kcompressd
+    Kcompressd { value: i32 },
+
+    /// Memory: Enable/disable MGLRU (1/0)
+    Mglru { value: u8 },
+    /// Memory: Set MGLRU min_ttl_ms
+    MglruTtl { value: i32 },
+
+    /// zRAM: set size in GB (2, 3, 4, 6, 8)
+    ZramSize { gb: u64 },
+
+    /// zRAM: set compression algorithm (lzo, lz4, lz4hc, zstd, deflate, 842)
+    ZramAlgorithm { algorithm: String },
+
+    /// Reapply the persisted tuning settings
+    Apply,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -953,6 +1073,69 @@ pub fn run() -> Result<()> {
         },
         Commands::Initrc { command } => match command {
             Initrc::Refresh => regenerate_preinit(),
+        },
+        Commands::Tuning { command } => match command {
+            TuningCmd::Status => crate::android::tuning::print_status(),
+            TuningCmd::List => crate::android::tuning::list_profiles(),
+            TuningCmd::Thermal { index } => crate::android::tuning::set_thermal_profile(index),
+            TuningCmd::AppThermal { uid, index } => crate::android::tuning::set_app_thermal(uid, index),
+            TuningCmd::AppThermalRemove { uid } => crate::android::tuning::remove_app_thermal(uid),
+            TuningCmd::AppThermalClear => crate::android::tuning::clear_app_thermals(),
+            TuningCmd::AppThermalList => {
+                crate::android::tuning::print_app_thermals();
+                Ok(())
+            }
+            TuningCmd::Watch => crate::android::tuning::run_tuning_watch(),
+            TuningCmd::ChargeLimit { percent } => crate::android::tuning::set_charge_limit(percent),
+            TuningCmd::ChargeLimitToggle { value } => {
+                crate::android::tuning::set_charge_limit_enabled(value != 0)
+            }
+            TuningCmd::ChargeWritable { value } => {
+                crate::android::tuning::set_charge_writable(value != 0)
+            }
+            TuningCmd::ChargeCurrent { ua } => crate::android::tuning::set_charge_current(ua),
+            TuningCmd::Bypass { value } => crate::android::tuning::set_bypass(value != 0),
+            TuningCmd::SchedSkipHeadroom { value } => {
+                crate::android::tuning::set_sched_skip_headroom(value)
+            }
+            TuningCmd::SchedPeltMultiplier { value } => {
+                crate::android::tuning::set_sched_pelt_multiplier(value)
+            }
+            TuningCmd::SchedHrScaling { value } => {
+                crate::android::tuning::set_sched_hr_scaling(value)
+            }
+            TuningCmd::SchedBoostHrLp { value } => {
+                crate::android::tuning::set_sched_boost_hr_lp(value)
+            }
+            TuningCmd::SchedBoostHrBig { value } => {
+                crate::android::tuning::set_sched_boost_hr_big(value)
+            }
+            TuningCmd::SchedBoostHrPrime { value } => {
+                crate::android::tuning::set_sched_boost_hr_prime(value)
+            }
+            TuningCmd::Cgroup { name, key, value } => {
+                crate::android::tuning::set_cgroup_value(&name, &key, value)
+            }
+            TuningCmd::Persist { value } => crate::android::tuning::set_persist(value != 0),
+
+            TuningCmd::TcpCongestion { value } => crate::android::tuning::set_tcp_congestion(&value),
+            TuningCmd::Qdisc { value } => crate::android::tuning::set_qdisc(&value),
+
+            TuningCmd::Swappiness { value } => crate::android::tuning::set_swappiness(value),
+            TuningCmd::VfsCache { value } => crate::android::tuning::set_vfs_cache_pressure(value),
+            TuningCmd::Kcompressd { value } => crate::android::tuning::set_kcompressd(value),
+            TuningCmd::Mglru { value } => crate::android::tuning::set_mglru(value != 0),
+            TuningCmd::MglruTtl { value } => crate::android::tuning::set_mglru_ttl(value),
+
+            TuningCmd::ZramSize { gb } => crate::android::tuning::set_zram_size(gb),
+            TuningCmd::ZramAlgorithm { algorithm } => {
+                crate::android::tuning::set_zram_algorithm(&algorithm)
+            }
+
+            TuningCmd::Apply => {
+                crate::android::tuning::apply_persisted();
+                Ok(())
+            }
         },
     };
 

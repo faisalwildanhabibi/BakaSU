@@ -189,6 +189,14 @@ pub fn on_services() {
     info!("on_services triggered!");
     automate_tailscale();
     run_stage("service", ScriptWait::NoWait);
+
+    // restore thermal / bypass charging preferences chosen in the manager
+    crate::android::tuning::apply_persisted();
+
+    // start the thermal / charge-limit watcher when needed
+    if let Err(e) = crate::android::tuning::ensure_tuning_watch_running() {
+        log::warn!("failed to start tuning watcher: {e:#}");
+    }
 }
 
 fn automate_tailscale() {
