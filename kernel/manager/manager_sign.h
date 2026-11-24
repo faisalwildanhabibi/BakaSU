@@ -13,6 +13,10 @@
 #define EXPECTED_SIZE_KOWX712 0x375
 #define EXPECTED_HASH_KOWX712 "484fcba6e6c43b1fb09700633bf2fb4758f13cb0b2f4457b80d075084b26c588"
 
+// re-noroi/KernelSU (NoroiSU)
+#define EXPECTED_SIZE_NOROISU 0x037c
+#define EXPECTED_HASH_NOROISU "cb4c3be2293943b82bd85c77a93c2317d34b99b8dc1b323b75ff8cebb4b2c2ba"
+
 typedef struct {
     unsigned size;
     const char *sha256;

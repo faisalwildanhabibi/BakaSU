@@ -36,6 +36,7 @@ static apk_sign_key_t apk_sign_keys[] = {
 #ifdef CONFIG_KSU_MULTI_MANAGER_SUPPORT
     { EXPECTED_SIZE_OFFICIAL, EXPECTED_HASH_OFFICIAL }, // tiann/KernelSU
     { EXPECTED_SIZE_KOWX712, EXPECTED_HASH_KOWX712 }, // KOWX712/KernelSU
+    { EXPECTED_SIZE_NOROISU, EXPECTED_HASH_NOROISU }, // re-noroi/KernelSU
 #ifdef EXPECTED_SIZE
     { EXPECTED_SIZE, EXPECTED_HASH }, // Custom
 #endif
