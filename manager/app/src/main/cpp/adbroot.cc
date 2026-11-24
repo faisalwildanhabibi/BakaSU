@@ -34,6 +34,8 @@ struct prop_info {
 
 static struct prop_info g_adb_root_prop;
 static struct prop_info g_adb_tcp_port_prop;
+static struct prop_info g_adb_persist_tcp_port_prop;
+static struct prop_info g_adb_secure_prop;
 
 static const char* get_persistent_adb_port(void) {
     static char port_str[16] = "5555";
@@ -66,6 +68,12 @@ const struct prop_info* __system_property_find(const char* name) {
         if (strcmp(name, "service.adb.tcp.port") == 0) {
             return &g_adb_tcp_port_prop;
         }
+        if (strcmp(name, "persist.adb.tcp.port") == 0) {
+            return &g_adb_persist_tcp_port_prop;
+        }
+        if (strcmp(name, "ro.adb.secure") == 0) {
+            return &g_adb_secure_prop;
+        }
     }
     if (!orig_find) {
         orig_find = (find_fn_t)dlsym(RTLD_NEXT, "__system_property_find");
@@ -91,6 +99,18 @@ void __system_property_read_callback(const struct prop_info* pi,
         }
         return;
     }
+    if (pi == &g_adb_persist_tcp_port_prop) {
+        if (callback) {
+            callback(cookie, "persist.adb.tcp.port", get_persistent_adb_port(), 0);
+        }
+        return;
+    }
+    if (pi == &g_adb_secure_prop) {
+        if (callback) {
+            callback(cookie, "ro.adb.secure", "0", 0);
+        }
+        return;
+    }
     if (!orig_fn) {
         orig_fn = (read_cb_fn_t)dlsym(RTLD_NEXT, "__system_property_read_callback");
     }
@@ -113,6 +133,16 @@ int __system_property_get(const char* name, char* value) {
             strncpy(value, p, PROP_VALUE_MAX);
             value[PROP_VALUE_MAX - 1] = '\0';
             return strlen(value);
+        }
+        if (strcmp(name, "persist.adb.tcp.port") == 0) {
+            const char *p = get_persistent_adb_port();
+            strncpy(value, p, PROP_VALUE_MAX);
+            value[PROP_VALUE_MAX - 1] = '\0';
+            return strlen(value);
+        }
+        if (strcmp(name, "ro.adb.secure") == 0) {
+            strcpy(value, "0");
+            return 1;
         }
     }
     if (!orig_fn) {
