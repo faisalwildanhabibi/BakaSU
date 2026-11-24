@@ -17,6 +17,10 @@
 #define EXPECTED_SIZE_NOROISU 0x037c
 #define EXPECTED_HASH_NOROISU "cb4c3be2293943b82bd85c77a93c2317d34b99b8dc1b323b75ff8cebb4b2c2ba"
 
+// SukiSU-Nova/SukiSU-Nova (SukiSU)
+#define EXPECTED_SIZE_SUKISU 0x35c
+#define EXPECTED_HASH_SUKISU "947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef"
+
 typedef struct {
     unsigned size;
     const char *sha256;

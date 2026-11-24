@@ -20,7 +20,7 @@ A [`tiann/KernelSU`](https://github.com/tiann/KernelSU)'s downstream, added some
 3. [App Profile](https://kernelsu.org/guide/app-profile.html): Lock up the root power in a cage
 4. Support non-GKI and GKI 1.0
 5. Tweaks to the manager theme and the built-in susfs management tool.
-6. Multi manager support, for default [Official KernelSU](https://github.com/tiann/KernelSU)/[KOWSU](https://github.com/KOWX712/KernelSU)/[NoroiSU](https://github.com/re-noroi/KernelSU) is supported work as manager with BakaSU's kernel
+6. Multi manager support, for default [Official KernelSU](https://github.com/tiann/KernelSU)/[KOWSU](https://github.com/KOWX712/KernelSU)/[NoroiSU](https://github.com/re-noroi/KernelSU)/[SukiSU](https://github.com/SukiSU-Nova/SukiSU-Nova) is supported work as manager with BakaSU's kernel
 
 ## Compatibility Status
 
