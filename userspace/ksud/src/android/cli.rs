@@ -1189,8 +1189,9 @@ pub fn run() -> Result<()> {
 
         Commands::Zygisk { command } => match command {
             ZygiskCommand::On => {
-                crate::android::builtin_zygisk::enable()?;
-                crate::android::builtin_zygisk::bootstrap()?;
+                crate::android::builtin_zygisk::switch_to(
+                    crate::android::builtin_zygisk::BUILTIN_TARGET,
+                )?;
                 println!("true");
                 Ok(())
             }
@@ -1201,15 +1202,23 @@ pub fn run() -> Result<()> {
             }
             ZygiskCommand::Status => {
                 let enabled = crate::android::builtin_zygisk::is_enabled();
-                let running = crate::android::builtin_zygisk::is_monitor_running();
-                let daemon = crate::android::builtin_zygisk::is_daemon_running();
-                let injected = crate::android::builtin_zygisk::is_zygote_injected();
-                let fully = crate::android::builtin_zygisk::is_fully_active();
-                let (version, version_code) = crate::android::builtin_zygisk::version()
-                    .unwrap_or_else(|| ("unknown".to_owned(), "0".to_owned()));
-                let zy_states: Vec<serde_json::Value> = crate::android::builtin_zygisk::zygote_states()
+                let monitor_running = crate::android::builtin_zygisk::is_monitor_active();
+                let daemon_running = crate::android::builtin_zygisk::is_daemon_active();
+                let zygote_injected = crate::android::builtin_zygisk::is_zygote_injected();
+                let fully_active = crate::android::builtin_zygisk::is_fully_active();
+                let zygotes: Vec<serde_json::Value> = crate::android::builtin_zygisk::zygote_states()
                     .into_iter()
                     .map(|(abi, status)| serde_json::json!({ "abi": abi, "status": status }))
+                    .collect();
+                let monitor = crate::android::builtin_zygisk::monitor_process();
+                let daemons = crate::android::builtin_zygisk::daemon_processes();
+                let (version, version_code) = crate::android::builtin_zygisk::version()
+                    .unwrap_or_else(|| ("unknown".to_owned(), "0".to_owned()));
+                let monitor_json =
+                    monitor.map(|(pid, name)| serde_json::json!({ "name": name, "pid": pid }));
+                let daemons_json: Vec<_> = daemons
+                    .into_iter()
+                    .map(|(pid, name)| serde_json::json!({ "name": name, "pid": pid }))
                     .collect();
                 let nm_active = crate::android::builtin_zygisk::is_nomount_active();
                 let nm_isolated_block = if nm_active {
@@ -1226,13 +1235,15 @@ pub fn run() -> Result<()> {
                     "{}",
                     serde_json::json!({
                         "enabled": enabled,
-                        "monitor": running,
-                        "daemon": daemon,
-                        "zygote_injected": injected,
-                        "fully_active": fully,
+                        "monitor_running": monitor_running,
+                        "daemon_running": daemon_running,
+                        "zygote_injected": zygote_injected,
+                        "fully_active": fully_active,
+                        "zygotes": zygotes,
+                        "monitor": monitor_json,
+                        "daemons": daemons_json,
                         "version": version,
                         "version_code": version_code,
-                        "zygotes": zy_states,
                         "nomount_active": nm_active,
                         "nomount_block_isolated": nm_isolated_block,
                         "nomount_isolated_uids_count": nm_uids.len(),
