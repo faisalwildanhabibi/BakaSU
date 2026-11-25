@@ -5,3 +5,4 @@ build.sh
 .trae
 /userspace/ksud/.lkm_image_bootstrap.o
 out
+build_artifacts/
