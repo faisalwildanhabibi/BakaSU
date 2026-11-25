@@ -108,6 +108,13 @@ pub fn on_post_fs_data() -> Result<()> {
     // Load susfs config entries that must capture metadata before mounts/overlays.
     crate::android::susfs::init_event::on_post_fs_data();
 
+    // Bootstrap built-in Zygisk if enabled
+    if crate::android::builtin_zygisk::is_enabled()
+        && let Err(e) = crate::android::builtin_zygisk::bootstrap()
+    {
+        warn!("bootstrap builtin zygisk failed: {e}");
+    }
+
     // execute metamodule post-fs-data script first (priority)
     if let Err(e) = metamodule::exec_stage_script("post-fs-data", wait) {
         warn!("exec metamodule post-fs-data script failed: {e}");

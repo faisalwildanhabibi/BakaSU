@@ -167,6 +167,14 @@ pub fn soft_reboot() -> Result<()> {
     if let Err(e) = reset_boot_completed() {
         warn!("reset boot completed failed: {e}");
     }
+
+    // Stop built-in zygisk monitor and clean disabled artifacts
+    if let Err(e) = crate::android::builtin_zygisk::shutdown() {
+        warn!("shutdown builtin zygisk failed: {e}");
+    }
+    if let Err(e) = crate::android::builtin_zygisk::cleanup_disabled() {
+        warn!("cleanup disabled builtin zygisk failed: {e}");
+    }
     run_stage(
         "emulated-soft-reboot",
         ScriptWait::Until(Instant::now() + defs::EMULATED_SOFT_REBOOT_TIMEOUT),

@@ -17,6 +17,10 @@ on:
         required: false
         type: boolean
         default: true
+      pack_builtzygisk:
+        required: false
+        type: boolean
+        default: true
       use_cache:
         required: false
         type: boolean
@@ -49,6 +53,22 @@ jobs:
           [ -f ksuinit-x86_64/ksuinit ] && mv ksuinit-x86_64/ksuinit ./userspace/ksud/bin/x86_64/ || true
           [ -f ksuinit-riscv64/ksuinit ] && mv ksuinit-riscv64/ksuinit ./userspace/ksud/bin/riscv64/ || true
           [ -f ksuinit-armv7/ksuinit ] && mv ksuinit-armv7/ksuinit ./userspace/ksud/bin/arm/ || true
+
+      - name: Prepare BuiltZygisk
+        if: ${{ inputs.pack_builtzygisk }}
+        run: |
+          for arch in aarch64 arm x86_64 riscv64; do
+            src=""
+            if [ -d "builtzygisk-$arch" ]; then
+              src="builtzygisk-$arch"
+            elif [ -d "artifacts/builtzygisk-$arch" ]; then
+              src="artifacts/builtzygisk-$arch"
+            fi
+            [ -n "$src" ] || continue
+            [ -d "$src/$arch" ] && src="$src/$arch"
+            cp -rf "$src"/. "./userspace/ksud/bin/$arch/"
+            echo "packed $arch: $(ls "$PWD/userspace/ksud/bin/$arch" | tr '\n' ' ')"
+          done
 
       - name: Setup Rust toolchain
         if: ${{ inputs.target != 'riscv64-linux-android' }}
