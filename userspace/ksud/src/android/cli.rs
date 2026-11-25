@@ -1142,10 +1142,15 @@ pub fn run() -> Result<()> {
             Initrc::Refresh => regenerate_preinit(),
         },
         Commands::Tuning { command } => match command {
-            TuningCmd::Status => crate::android::tuning::print_status(),
+            TuningCmd::Status => {
+                crate::android::tuning::print_status();
+                Ok(())
+            }
             TuningCmd::List => crate::android::tuning::list_profiles(),
             TuningCmd::Thermal { index } => crate::android::tuning::set_thermal_profile(index),
-            TuningCmd::AppThermal { uid, index } => crate::android::tuning::set_app_thermal(uid, index),
+            TuningCmd::AppThermal { uid, index } => {
+                crate::android::tuning::set_app_thermal(uid, index)
+            }
             TuningCmd::AppThermalRemove { uid } => crate::android::tuning::remove_app_thermal(uid),
             TuningCmd::AppThermalClear => crate::android::tuning::clear_app_thermals(),
             TuningCmd::AppThermalList => {
@@ -1185,7 +1190,9 @@ pub fn run() -> Result<()> {
             }
             TuningCmd::Persist { value } => crate::android::tuning::set_persist(value != 0),
 
-            TuningCmd::TcpCongestion { value } => crate::android::tuning::set_tcp_congestion(&value),
+            TuningCmd::TcpCongestion { value } => {
+                crate::android::tuning::set_tcp_congestion(&value)
+            }
             TuningCmd::Qdisc { value } => crate::android::tuning::set_qdisc(&value),
 
             TuningCmd::Swappiness { value } => crate::android::tuning::set_swappiness(value),
