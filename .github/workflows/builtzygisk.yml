@@ -33,6 +33,14 @@ jobs:
           ndk-version: r27c
           add-to-path: true
 
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
       - name: Initialize BuiltZygisk Submodules
         working-directory: external/BuiltZygisk
         run: |

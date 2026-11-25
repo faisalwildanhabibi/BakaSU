@@ -51,8 +51,11 @@ jobs:
         run: |
           keytool -genkeypair -alias hma-key -keyalg RSA -keysize 2048 -validity 1 \
             -storepass android -keypass android -dname "CN=HMA" -storetype JKS -keystore hma.jks
-          cat << 'EOF' > local.properties
-          fileDir=hma.jks
+          mkdir -p zygote app
+          cp hma.jks zygote/hma.jks
+          cp hma.jks app/hma.jks
+          cat << EOF > local.properties
+          fileDir=${GITHUB_WORKSPACE}/external/HMA-OSS-UID/hma.jks
           storePassword=android
           keyAlias=hma-key
           keyPassword=android
