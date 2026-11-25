@@ -97,6 +97,8 @@ jobs:
 
   build-ksuinit:
     uses: ./.github/workflows/ksuinit.yml
+    with:
+      arch: arm64
 
   build-ksud:
     needs: [build-ksuinit]
@@ -105,9 +107,6 @@ jobs:
       matrix:
         target:
           - aarch64-linux-android
-          - x86_64-linux-android
-          - armv7-linux-androideabi
-          - riscv64-linux-android
         os: [ubuntu-latest]
     uses: ./.github/workflows/ksud.yml
     with:
@@ -122,7 +121,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build_type: [ "release", "debug" ]
+        build_type: [ "release" ]
     defaults:
       run:
         working-directory: ./manager
@@ -192,18 +191,16 @@ jobs:
           fi
 
           if [ "${{ github.event_name }}" == "pull_request" ]; then
-            ./gradlew assemble${{ matrix.build_type }} -Pcommit=${{ steps.commit.outputs.COMMIT_SHA }} -PIS_PR_BUILD=true $BUILD_EXTRA_ARGS
+            ./gradlew assembleRelease -Pcommit=${{ steps.commit.outputs.COMMIT_SHA }} -PIS_PR_BUILD=true $BUILD_EXTRA_ARGS
           else
-            ./gradlew assemble${{ matrix.build_type }} -Pcommit=${{ steps.commit.outputs.COMMIT_SHA }} $BUILD_EXTRA_ARGS
+            ./gradlew assembleRelease -Pcommit=${{ steps.commit.outputs.COMMIT_SHA }} $BUILD_EXTRA_ARGS
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Manager-gradle-${{ matrix.build_type }}
-          path: |
-            manager/app/build/outputs/apk/release/*.apk
-            manager/app/build/outputs/apk/debug/*.apk
+          name: Manager-gradle-release
+          path: manager/app/build/outputs/apk/release/*.apk
 
       - name: Upload mappings
         uses: actions/upload-artifact@v7
@@ -219,7 +216,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build_type: [ "release", "debug" ]
+        build_type: [ "release" ]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -229,8 +226,8 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v8
         with:
-            name: Manager-gradle-${{ matrix.build_type }}
-            path: artifacts/Manager-gradle-${{ matrix.build_type }}
+          name: Manager-gradle-release
+          path: artifacts/Manager-gradle-release
       
       - name: Download arm64 ksud
         uses: actions/download-artifact@v8
@@ -238,49 +235,18 @@ jobs:
           name: ksud-aarch64-linux-android
           path: artifacts/ksud-aarch64-linux-android
 
-      - name: Download x86_64 ksud
-        uses: actions/download-artifact@v8
-        with:
-          name: ksud-x86_64-linux-android
-          path: artifacts/ksud-x86_64-linux-android
-
-      - name: Download arm ksud
-        uses: actions/download-artifact@v8
-        with:
-          name: ksud-armv7-linux-androideabi
-          path: artifacts/ksud-armv7-linux-androideabi
-
-      - name: Download RISC-V ksud
-        uses: actions/download-artifact@v8
-        with:
-          name: ksud-riscv64-linux-android
-          path: artifacts/ksud-riscv64-linux-android
-
-
       - name: Place manager apk and ksud artifacts
         run: |
-          mkdir -p manager/app/build/outputs/apk/${{ matrix.build_type }}
-          APKS=$(find artifacts/Manager-gradle-${{ matrix.build_type }} -type f -name "*.apk")
+          mkdir -p manager/app/build/outputs/apk/release
+          APKS=$(find artifacts/Manager-gradle-release -type f -name "*arm64-v8a*.apk" -o -name "*universal*.apk")
           APKS=$(echo "$APKS" | tr '\n' ' ')
           test -n "$APKS"
-          cp -f $APKS manager/app/build/outputs/apk/${{ matrix.build_type }}/
+          cp -f $APKS manager/app/build/outputs/apk/release/
 
           mkdir -p target/aarch64-linux-android/release
-          mkdir -p target/armv7-linux-androideabi/release
-          mkdir -p target/x86_64-linux-android/release
-          mkdir -p target/riscv64-linux-android/release
           ARM64_KSUD=$(find artifacts/ksud-aarch64-linux-android -type f -name ksud | head -n 1)
-          ARMV7_KSUD=$(find artifacts/ksud-armv7-linux-androideabi -type f -name ksud | head -n 1)
-          X86_64_KSUD=$(find artifacts/ksud-x86_64-linux-android -type f -name ksud | head -n 1)
-          RISCV64_KSUD=$(find artifacts/ksud-riscv64-linux-android -type f -name ksud | head -n 1)
           test -n "$ARM64_KSUD"
-          test -n "$ARMV7_KSUD"
-          test -n "$X86_64_KSUD"
-          test -n "$RISCV64_KSUD"
           cp -f "$ARM64_KSUD" target/aarch64-linux-android/release/ksud
-          cp -f "$ARMV7_KSUD" target/armv7-linux-androideabi/release/ksud
-          cp -f "$X86_64_KSUD" target/x86_64-linux-android/release/ksud
-          cp -f "$RISCV64_KSUD" target/riscv64-linux-android/release/ksud
 
       - name: Prepare signing inputs
         env:
@@ -309,12 +275,9 @@ jobs:
       - name: Repack and resign
         run: |
           python3 repack_apk_multi.py repack \
-            -b ${{ matrix.build_type }} \
+            -b release \
             -t release \
             -a arm64-v8a \
-            -a armeabi-v7a \
-            -a x86_64 \
-            -a riscv64 \
             -K "$SIGN_KEYSTORE_FILE" \
             -A "$SIGN_KEY_ALIAS" \
             -P "$SIGN_KEYSTORE_PASSWORD" \
@@ -324,13 +287,13 @@ jobs:
       - name: Delete gradle build
         uses: GeekyEggo/delete-artifact@v6
         with:
-          name: Manager-gradle-${{ matrix.build_type }}
+          name: Manager-gradle-release
         
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Manager-${{ matrix.build_type }}
-          path: dist/*.apk
+          name: BakaSU-PocoF3-arm64-v8a-release
+          path: dist/*arm64-v8a*.apk
 
   publish-release:
     name: Publish Manager to Release
@@ -343,27 +306,15 @@ jobs:
       - name: Download release manager
         uses: actions/download-artifact@v8
         with:
-          name: Manager-release
+          name: BakaSU-PocoF3-arm64-v8a-release
           path: release-apk
-
-      - name: Download debug manager
-        uses: actions/download-artifact@v8
-        with:
-          name: Manager-debug
-          path: debug-apk
 
       - name: Delete intermediate artifacts
         uses: GeekyEggo/delete-artifact@v6
         with:
           name: |
             ksud-aarch64-linux-android
-            ksud-x86_64-linux-android
-            ksud-armv7-linux-androideabi
-            ksud-riscv64-linux-android
             ksuinit-aarch64
-            ksuinit-x86_64
-            ksuinit-armv7
-            ksuinit-riscv64
             Manager-mappings
           failOnError: false
 
@@ -371,17 +322,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: continuous
-          name: "BakaSU Manager (Continuous Build)"
+          name: "BakaSU Manager - Poco F3 (Alioth)"
           body: |
-            ### BakaSU Manager Automated Continuous Build
+            ### BakaSU Manager (Poco F3 Alioth ARM64)
+            - **Target Device**: Poco F3 / Redmi K40 / Mi 11X (`alioth`)
+            - **Architecture**: ARM64-v8a (aarch64)
+            - **Variant**: Release
             - **Commit**: ${{ github.sha }}
             - **Branch**: `${{ github.ref_name }}`
-
-            #### Berkas APK Hasil Kompilasi:
-            Unduh langsung berkas APK di bawah ini:
+            
+            Unduh langsung berkas `.apk` murni tanpa arsip zip di bawah ini:
           prerelease: true
-          files: |
-            release-apk/*.apk
-            debug-apk/*.apk
+          files: release-apk/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

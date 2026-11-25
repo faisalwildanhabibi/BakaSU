@@ -44,10 +44,11 @@ jobs:
       - name: Prepare ksuinit
         if: ${{ inputs.pack_ksuinit }}
         run: |
-          mv ksuinit-aarch64/ksuinit ./userspace/ksud/bin/aarch64/
-          mv ksuinit-x86_64/ksuinit ./userspace/ksud/bin/x86_64/
-          mv ksuinit-riscv64/ksuinit ./userspace/ksud/bin/riscv64/
-          mv ksuinit-armv7/ksuinit ./userspace/ksud/bin/arm/
+          mkdir -p ./userspace/ksud/bin/aarch64/ ./userspace/ksud/bin/x86_64/ ./userspace/ksud/bin/riscv64/ ./userspace/ksud/bin/arm/
+          [ -f ksuinit-aarch64/ksuinit ] && mv ksuinit-aarch64/ksuinit ./userspace/ksud/bin/aarch64/ || true
+          [ -f ksuinit-x86_64/ksuinit ] && mv ksuinit-x86_64/ksuinit ./userspace/ksud/bin/x86_64/ || true
+          [ -f ksuinit-riscv64/ksuinit ] && mv ksuinit-riscv64/ksuinit ./userspace/ksud/bin/riscv64/ || true
+          [ -f ksuinit-armv7/ksuinit ] && mv ksuinit-armv7/ksuinit ./userspace/ksud/bin/arm/ || true
 
       - name: Setup Rust toolchain
         if: ${{ inputs.target != 'riscv64-linux-android' }}
