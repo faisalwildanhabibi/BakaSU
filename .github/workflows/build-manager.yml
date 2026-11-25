@@ -9,7 +9,10 @@ on:
       - '.github/workflows/ddk-lkm.yml'
       - '.github/workflows/ksud.yml'
       - '.github/workflows/ksuinit.yml'
+      - '.github/workflows/builtzygisk.yml'
+      - '.github/workflows/hma.yml'
       - '.github/riscv64-cargo.toml'
+      - 'external/HMA-OSS-UID/**'
       - 'manager/**'
       - 'kernel/**'
       - 'userspace/**'
@@ -90,6 +93,7 @@ jobs:
   build-ksud:
     needs: [build-lkm, build-ksuinit, build-builtzygisk]
     strategy:
+      fail-fast: false
       matrix:
         target:
           - aarch64-linux-android

@@ -555,6 +555,15 @@ pub fn print_profiles() {
     }
 }
 
+pub fn list_profiles() -> Result<()> {
+    print_profiles();
+    Ok(())
+}
+
+pub fn set_thermal_profile(index: i32) -> Result<()> {
+    set_thermal(index)
+}
+
 /// Apply a thermal profile and remember it for the next boot.
 ///
 /// # Errors
