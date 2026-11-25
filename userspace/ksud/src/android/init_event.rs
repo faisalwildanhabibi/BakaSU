@@ -109,10 +109,10 @@ pub fn on_post_fs_data() -> Result<()> {
     crate::android::susfs::init_event::on_post_fs_data();
 
     // Bootstrap built-in Zygisk if enabled
-    if crate::android::builtin_zygisk::is_enabled() {
-        if let Err(e) = crate::android::builtin_zygisk::bootstrap() {
-            warn!("bootstrap builtin zygisk failed: {e}");
-        }
+    if crate::android::builtin_zygisk::is_enabled()
+        && let Err(e) = crate::android::builtin_zygisk::bootstrap()
+    {
+        warn!("bootstrap builtin zygisk failed: {e}");
     }
 
     // execute metamodule post-fs-data script first (priority)

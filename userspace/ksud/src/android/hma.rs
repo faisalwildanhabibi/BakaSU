@@ -110,7 +110,7 @@ fn find_or_create_active_hma_dir() -> Result<PathBuf> {
         }
     }
     let fallback = base.join("hide_my_applist_main");
-    ensure_dir_exists(&fallback.to_string_lossy())?;
+    ensure_dir_exists(&fallback)?;
     Ok(fallback)
 }
 
@@ -120,12 +120,11 @@ fn get_root_granted_uids() -> HashSet<u32> {
     if let Ok(entries) = fs::read_dir(profile_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if let Ok(uid) = name.parse::<u32>() {
-                        root_uids.insert(uid);
-                    }
-                }
+            if path.is_file()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && let Ok(uid) = name.parse::<u32>()
+            {
+                root_uids.insert(uid);
             }
         }
     }
@@ -160,10 +159,10 @@ pub fn status() -> HmaStatus {
             if reader.read_line(&mut line).is_ok() {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 && parts[0] == boot_id {
-                    let gen = parts[1];
-                    if gen.starts_with('g') {
-                        active_generation = gen.to_string();
-                        let gen_dir = hma_dir.join("uid_scope").join(gen);
+                    let gen_str = parts[1];
+                    if gen_str.starts_with('g') {
+                        active_generation = gen_str.to_string();
+                        let gen_dir = hma_dir.join("uid_scope").join(gen_str);
                         if let Ok(entries) = fs::read_dir(&gen_dir) {
                             scoped_apps_count = entries.flatten().count();
                             uid_scope_ready = scoped_apps_count > 0;
@@ -195,7 +194,7 @@ pub fn sync_uid_scope() -> Result<usize> {
 
     let hma_dir = find_or_create_active_hma_dir()?;
     let uid_scope_dir = hma_dir.join("uid_scope");
-    ensure_dir_exists(&uid_scope_dir.to_string_lossy())?;
+    ensure_dir_exists(&uid_scope_dir)?;
 
     let root_granted_uids = get_root_granted_uids();
     let mut hidden_uids: HashSet<u32> = HashSet::new();
@@ -246,7 +245,7 @@ pub fn sync_uid_scope() -> Result<usize> {
 
     let generation = "g0";
     let gen_dir = uid_scope_dir.join(generation);
-    ensure_dir_exists(&gen_dir.to_string_lossy())?;
+    ensure_dir_exists(&gen_dir)?;
 
     // 1. Generate UID Seccomp scope rule files for non-root target applications
     let mut synced_count = 0;
