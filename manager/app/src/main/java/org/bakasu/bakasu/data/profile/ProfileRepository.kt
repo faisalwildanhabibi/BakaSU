@@ -51,6 +51,8 @@ class ProfileRepository(
                         shouldUmount = Natives.uidShouldUmount(profile.currentUid),
                     ),
                 )
+                // Automatically synchronize HMA rules when root permissions change
+                ksuCliRepository.syncHmaUidRules()
             }
         }
     }

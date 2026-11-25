@@ -93,6 +93,7 @@ mod android {
     pub const BUILTIN_HMA_MODULE_ID: &str = "hma_oss_zygisk";
     pub const BUILTIN_HMA_DIR: &str = concatcp!(MODULE_DIR, "hma_oss_zygisk/");
     pub const BUILTIN_HMA_FLAG: &str = concatcp!(WORKING_DIR, ".builtin_hma");
+    pub const DISABLE_HMA_FLAG: &str = concatcp!(WORKING_DIR, ".disable_hma");
 
     #[derive(Serialize)]
     pub struct MountInfo {

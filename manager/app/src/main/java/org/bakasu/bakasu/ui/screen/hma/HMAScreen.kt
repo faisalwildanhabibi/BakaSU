@@ -57,11 +57,12 @@ fun HMAScreen() {
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
-    var isHmaEnabled by remember { mutableStateOf(false) }
+    var isHmaEnabled by remember { mutableStateOf(true) }
     var isHmaInstalled by remember { mutableStateOf(false) }
     var hmaVersion by remember { mutableStateOf("177-UID3.1") }
     var isUidScopeReady by remember { mutableStateOf(false) }
     var scopedAppsCount by remember { mutableStateOf(0) }
+    var rootGrantedHiddenCount by remember { mutableStateOf(0) }
     var activeGeneration by remember { mutableStateOf("") }
     var isChecking by remember { mutableStateOf(true) }
 
@@ -76,6 +77,7 @@ fun HMAScreen() {
                     hmaVersion = status.version.ifEmpty { "177-UID3.1" }
                     isUidScopeReady = status.uid_scope_ready
                     scopedAppsCount = status.scoped_apps_count
+                    rootGrantedHiddenCount = status.root_granted_hidden_count
                     activeGeneration = status.active_generation
                 }
                 isChecking = false
@@ -206,6 +208,29 @@ fun HMAScreen() {
                                 icon = Icons.TwoTone.Apps,
                                 title = stringResource(R.string.hma_scoped_apps_count),
                                 description = "$scopedAppsCount apps configured with UID seccomp filter",
+                            )
+                        }
+                    },
+                )
+            }
+
+            item {
+                SegmentedColumn(
+                    title = stringResource(R.string.hma_preset_title),
+                    content = {
+                        item {
+                            SettingsBaseWidget(
+                                icon = Icons.TwoTone.Shield,
+                                title = stringResource(R.string.hma_preset_title),
+                                description = stringResource(R.string.hma_preset_summary),
+                            )
+                        }
+
+                        item {
+                            SettingsBaseWidget(
+                                icon = Icons.TwoTone.Apps,
+                                title = stringResource(R.string.hma_root_hidden_count),
+                                description = "$rootGrantedHiddenCount root applications isolated from target non-root apps",
                             )
                         }
                     },
