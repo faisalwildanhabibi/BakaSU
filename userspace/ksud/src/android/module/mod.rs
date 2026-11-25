@@ -156,6 +156,11 @@ pub fn foreach_module(
             continue;
         }
 
+        if module_type == Active && crate::android::builtin_zygisk::suppresses_module_dir(&path) {
+            info!("{} is suppressed by built-in Zygisk, skip", path.display());
+            continue;
+        }
+
         f(&path)?;
     }
 

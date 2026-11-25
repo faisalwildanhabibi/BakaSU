@@ -180,6 +180,12 @@ enum Commands {
         #[command(subcommand)]
         command: TuningCmd,
     },
+
+    /// Manage built-in Zygisk
+    Zygisk {
+        #[command(subcommand)]
+        command: ZygiskCommand,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -294,6 +300,47 @@ pub enum TuningCmd {
 
     /// Reapply the persisted tuning settings
     Apply,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum ZygiskCommand {
+    /// Enable built-in Zygisk and start it now
+    On,
+    /// Disable built-in Zygisk
+    Off,
+    /// Check built-in Zygisk status
+    Status,
+    /// Report the active Zygisk implementation (running, reboot, disabled or none)
+    Info,
+    /// Switch to the built-in Zygisk or to an installed provider module, live
+    Switch {
+        /// `builtin` or the id of an installed Zygisk module
+        #[arg(default_value = "builtin")]
+        target: String,
+    },
+    /// List the monitor and daemon processes of an implementation as JSON
+    Processes {
+        /// `builtin` or the id of an installed Zygisk module
+        #[arg(default_value = "builtin")]
+        target: String,
+    },
+    /// List the Zygisk modules the built-in is serving, with their processes, as JSON
+    Modules,
+    /// Reload built-in Zygisk
+    Rearm,
+    /// Read or change BuiltZygisk options (`config.prop`)
+    Config {
+        #[command(subcommand)]
+        command: ZygiskConfigCommand,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum ZygiskConfigCommand {
+    /// Print all options as JSON
+    Get,
+    /// Set one option, e.g. `ksud zygisk config set custom_linker 1`
+    Set { key: String, value: String },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -1136,6 +1183,135 @@ pub fn run() -> Result<()> {
                 crate::android::tuning::apply_persisted();
                 Ok(())
             }
+        },
+
+        Commands::Zygisk { command } => match command {
+            ZygiskCommand::On => {
+                crate::android::builtin_zygisk::enable()?;
+                crate::android::builtin_zygisk::bootstrap()?;
+                println!("true");
+                Ok(())
+            }
+            ZygiskCommand::Off => {
+                crate::android::builtin_zygisk::disable()?;
+                println!("true");
+                Ok(())
+            }
+            ZygiskCommand::Status => {
+                let enabled = crate::android::builtin_zygisk::is_enabled();
+                let running = crate::android::builtin_zygisk::is_monitor_running();
+                let daemon = crate::android::builtin_zygisk::is_daemon_running();
+                let injected = crate::android::builtin_zygisk::is_zygote_injected();
+                let fully = crate::android::builtin_zygisk::is_fully_active();
+                let (version, version_code) = crate::android::builtin_zygisk::version()
+                    .unwrap_or_else(|| ("unknown".to_owned(), "0".to_owned()));
+                let zy_states: Vec<serde_json::Value> = crate::android::builtin_zygisk::zygote_states()
+                    .into_iter()
+                    .map(|(abi, status)| serde_json::json!({ "abi": abi, "status": status }))
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "enabled": enabled,
+                        "monitor": running,
+                        "daemon": daemon,
+                        "zygote_injected": injected,
+                        "fully_active": fully,
+                        "version": version,
+                        "version_code": version_code,
+                        "zygotes": zy_states,
+                        "nomount_active": crate::android::builtin_zygisk::is_nomount_active(),
+                    })
+                );
+                Ok(())
+            }
+            ZygiskCommand::Info => {
+                let info = crate::android::builtin_zygisk::implementation_info();
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "state": info.state,
+                        "id": info.id,
+                        "name": info.name,
+                        "version": info.version,
+                        "providers": crate::android::builtin_zygisk::provider_ids(),
+                    })
+                );
+                Ok(())
+            }
+            ZygiskCommand::Switch { target } => {
+                crate::android::builtin_zygisk::switch_to(&target)?;
+                println!("true");
+                Ok(())
+            }
+            ZygiskCommand::Processes { target } => {
+                let procs = crate::android::builtin_zygisk::processes(&target)?;
+                let list = |entries: Vec<(i32, String)>| {
+                    entries
+                        .into_iter()
+                        .map(|(pid, name)| serde_json::json!({ "name": name, "pid": pid }))
+                        .collect::<Vec<serde_json::Value>>()
+                };
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "monitors": list(procs.monitors),
+                        "daemons": list(procs.daemons),
+                    })
+                );
+                Ok(())
+            }
+            ZygiskCommand::Modules => {
+                let modules: Vec<serde_json::Value> = crate::android::builtin_zygisk::injected_modules()
+                    .into_iter()
+                    .map(|module| {
+                        let processes: Vec<serde_json::Value> = module
+                            .processes
+                            .into_iter()
+                            .map(|(name, pid, kind)| {
+                                serde_json::json!({
+                                    "name": name,
+                                    "pid": pid,
+                                    "kind": kind,
+                                })
+                            })
+                            .collect();
+                        serde_json::json!({
+                            "id": module.id,
+                            "name": module.name,
+                            "version": module.version,
+                            "type": module.kind,
+                            "abi": module.abi,
+                            "targets": module.targets,
+                            "companion": module.companion,
+                            "state": module.state,
+                            "processes": processes,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::json!({ "modules": modules }));
+                Ok(())
+            }
+            ZygiskCommand::Rearm => {
+                crate::android::builtin_zygisk::rearm()?;
+                println!("true");
+                Ok(())
+            }
+            ZygiskCommand::Config { command } => match command {
+                ZygiskConfigCommand::Get => {
+                    let fields: Vec<String> = crate::android::builtin_zygisk::config_get_all()
+                        .into_iter()
+                        .map(|(k, v)| format!(r#""{k}":"{v}""#))
+                        .collect();
+                    println!("{{{}}}", fields.join(","));
+                    Ok(())
+                }
+                ZygiskConfigCommand::Set { key, value } => {
+                    crate::android::builtin_zygisk::config_set(&key, &value)?;
+                    println!("true");
+                    Ok(())
+                }
+            },
         },
     };
 

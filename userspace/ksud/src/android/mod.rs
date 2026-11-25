@@ -1,3 +1,4 @@
+pub mod builtin_zygisk;
 pub mod cli;
 mod debug;
 mod dynamic_manager;
