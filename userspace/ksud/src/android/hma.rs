@@ -244,8 +244,8 @@ pub fn sync_uid_scope() -> Result<usize> {
     hidden_uid_list.sort_unstable();
     hidden_uid_list.truncate(128); // HMA-OSS-UID max limit per rule file
 
-    let gen = "g0";
-    let gen_dir = uid_scope_dir.join(gen);
+    let generation = "g0";
+    let gen_dir = uid_scope_dir.join(generation);
     ensure_dir_exists(&gen_dir.to_string_lossy())?;
 
     // 1. Generate UID Seccomp scope rule files for non-root target applications
@@ -273,7 +273,7 @@ pub fn sync_uid_scope() -> Result<usize> {
     }
 
     // 2. Write active marker
-    let active_content = format!("{boot_id} {gen}\n");
+    let active_content = format!("{boot_id} {generation}\n");
     let active_path = uid_scope_dir.join("active");
     fs::write(&active_path, active_content)
         .with_context(|| format!("Failed to write {}", active_path.display()))?;
