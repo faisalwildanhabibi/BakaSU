@@ -17,6 +17,7 @@ mod android {
     pub const LIBRARY_DIR: &str = concatcp!(WORKING_DIR, "lib/");
     pub const LOG_DIR: &str = concatcp!(WORKING_DIR, "log/");
     pub const SULOGD_LOCK_PATH: &str = concatcp!(WORKING_DIR, "sulogd.lock");
+    pub const TUNING_WATCH_LOCK_PATH: &str = concatcp!(WORKING_DIR, "tuning_watch.lock");
 
     pub const PROFILE_DIR: &str = concatcp!(WORKING_DIR, "profile/");
     pub const PROFILE_SELINUX_DIR: &str = concatcp!(PROFILE_DIR, "selinux/");
@@ -85,6 +86,15 @@ mod android {
 
     pub const DYNAMIC_MANAGER: &str = concatcp!(WORKING_DIR, ".dynamic_manager");
     pub const SUSFS_CONFIG: &str = concatcp!(WORKING_DIR, ".susfs.json");
+
+    pub const BUILTIN_ZYGISK_FLAG: &str = concatcp!(WORKING_DIR, ".builtin_zygisk");
+    pub const BUILTIN_ZYGISK_DIR: &str = concatcp!(WORKING_DIR, "zygisk/");
+    pub const BUILTIN_ZYGISK_WORK_DIR: &str = "/data/system/nyazygisk";
+
+    pub const BUILTIN_HMA_MODULE_ID: &str = "hma_oss_zygisk";
+    pub const BUILTIN_HMA_DIR: &str = concatcp!(MODULE_DIR, "hma_oss_zygisk/");
+    pub const BUILTIN_HMA_FLAG: &str = concatcp!(WORKING_DIR, ".builtin_hma");
+    pub const DISABLE_HMA_FLAG: &str = concatcp!(WORKING_DIR, ".disable_hma");
 
     #[derive(Serialize)]
     pub struct MountInfo {

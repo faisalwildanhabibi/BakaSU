@@ -9,7 +9,10 @@ on:
       - '.github/workflows/ddk-lkm.yml'
       - '.github/workflows/ksud.yml'
       - '.github/workflows/ksuinit.yml'
+      - '.github/workflows/builtzygisk.yml'
+      - '.github/workflows/hma.yml'
       - '.github/riscv64-cargo.toml'
+      - 'external/HMA-OSS-UID/**'
       - 'manager/**'
       - 'kernel/**'
       - 'userspace/**'
@@ -84,9 +87,16 @@ jobs:
   build-ksuinit:
     uses: ./.github/workflows/ksuinit.yml
 
+  build-builtzygisk:
+    uses: ./.github/workflows/builtzygisk.yml
+
+  build-hma:
+    uses: ./.github/workflows/hma.yml
+
   build-ksud:
-    needs: [build-lkm, build-ksuinit]
+    needs: [build-lkm, build-ksuinit, build-builtzygisk, build-hma]
     strategy:
+      fail-fast: false
       matrix:
         target:
           - aarch64-linux-android
@@ -98,6 +108,7 @@ jobs:
     with:
       target: ${{ matrix.target }}
       os: ${{ matrix.os }}
+      pack_builtzygisk: true
 
   build-manager:
     needs: [prepare]
