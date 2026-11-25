@@ -7,6 +7,7 @@ use crate::{
 use anyhow::{Context, Result};
 use log::info;
 use serde::Serialize;
+use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
@@ -185,8 +186,270 @@ pub fn status() -> HmaStatus {
     }
 }
 
+fn read_or_init_config(hma_dir: &Path) -> Value {
+    let config_path = hma_dir.join("config.json");
+    let mut cfg = if let Ok(bytes) = fs::read(&config_path) {
+        serde_json::from_slice::<Value>(&bytes).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    if !cfg.is_object() {
+        cfg = serde_json::json!({});
+    }
+
+    let defaults = [
+        ("configVersion", serde_json::json!(95)),
+        ("uidFilterEnabled", serde_json::json!(true)),
+        ("uidFilterRevision", serde_json::json!(3)),
+        ("forceMountData", serde_json::json!(true)),
+        ("skipSystemAppDataIsolation", serde_json::json!(true)),
+        ("altAppDataIsolation", serde_json::json!(false)),
+        ("altVoldAppDataIsolation", serde_json::json!(false)),
+        ("disableActivityLaunchProtection", serde_json::json!(false)),
+        ("detailLog", serde_json::json!(false)),
+        ("errorOnlyLog", serde_json::json!(false)),
+        ("maxLogSize", serde_json::json!(512)),
+        ("ignoredPackagesForPresets", serde_json::json!([])),
+        ("templates", serde_json::json!({})),
+        ("scope", serde_json::json!({})),
+    ];
+
+    if let Some(obj) = cfg.as_object_mut() {
+        for (k, v) in defaults {
+            obj.entry(k).or_insert(v);
+        }
+    }
+
+    cfg
+}
+
+fn write_config(hma_dir: &Path, cfg: &Value) -> Result<()> {
+    let config_path = hma_dir.join("config.json");
+    let pretty = serde_json::to_string_pretty(cfg)?;
+    fs::write(&config_path, pretty)
+        .with_context(|| format!("Failed to write {}", config_path.display()))
+}
+
+pub fn get_config_json() -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    Ok(serde_json::to_string_pretty(&cfg)?)
+}
+
+pub fn set_config_key(key: &str, value: &str) -> Result<()> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let mut cfg = read_or_init_config(&hma_dir);
+
+    let bool_keys = [
+        "uidFilterEnabled",
+        "forceMountData",
+        "skipSystemAppDataIsolation",
+        "altAppDataIsolation",
+        "altVoldAppDataIsolation",
+        "disableActivityLaunchProtection",
+        "detailLog",
+        "errorOnlyLog",
+    ];
+
+    if bool_keys.contains(&key) {
+        let parsed = matches!(value, "1" | "true" | "True" | "TRUE");
+        cfg[key] = serde_json::json!(parsed);
+        if key == "uidFilterEnabled" {
+            cfg["uidFilterRevision"] = serde_json::json!(3);
+        }
+    } else if key == "maxLogSize" {
+        let parsed: i64 = value
+            .parse()
+            .with_context(|| format!("Invalid integer for maxLogSize: {value}"))?;
+        cfg[key] = serde_json::json!(parsed.clamp(64, 4096));
+    } else {
+        anyhow::bail!("Unsupported HMA config key: {key}");
+    }
+
+    write_config(&hma_dir, &cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+pub fn set_template(name: &str, is_whitelist: bool, apps_csv: &str) -> Result<()> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("Template name cannot be empty");
+    }
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let mut cfg = read_or_init_config(&hma_dir);
+
+    let apps: Vec<String> = apps_csv
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+
+    if cfg.get("templates").and_then(Value::as_object).is_none() {
+        cfg["templates"] = serde_json::json!({});
+    }
+    cfg["templates"][trimmed] = serde_json::json!({
+        "isWhitelist": is_whitelist,
+        "appList": apps,
+    });
+
+    write_config(&hma_dir, &cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+pub fn delete_template(name: &str) -> Result<()> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let mut cfg = read_or_init_config(&hma_dir);
+
+    if let Some(templates) = cfg.get_mut("templates").and_then(Value::as_object_mut) {
+        templates.remove(name);
+    }
+
+    if let Some(scope) = cfg.get_mut("scope").and_then(Value::as_object_mut) {
+        for app_cfg in scope.values_mut() {
+            if let Some(arr) = app_cfg
+                .get_mut("applyTemplates")
+                .and_then(Value::as_array_mut)
+            {
+                arr.retain(|v| v.as_str() != Some(name));
+            }
+        }
+    }
+
+    write_config(&hma_dir, &cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+pub fn set_scope(package: &str, app_config_json: &str) -> Result<()> {
+    let app_cfg: Value = serde_json::from_str(app_config_json)
+        .with_context(|| format!("Invalid AppConfig JSON for {package}"))?;
+    if !app_cfg.is_object() {
+        anyhow::bail!("AppConfig must be a JSON object");
+    }
+
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let mut cfg = read_or_init_config(&hma_dir);
+
+    if cfg.get("scope").and_then(Value::as_object).is_none() {
+        cfg["scope"] = serde_json::json!({});
+    }
+    cfg["scope"][package] = app_cfg;
+
+    if let Some(ignored) = cfg
+        .get_mut("ignoredPackagesForPresets")
+        .and_then(Value::as_array_mut)
+    {
+        ignored.retain(|v| v.as_str() != Some(package));
+    }
+
+    write_config(&hma_dir, &cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+pub fn remove_scope(package: &str) -> Result<()> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let mut cfg = read_or_init_config(&hma_dir);
+
+    if let Some(scope) = cfg.get_mut("scope").and_then(Value::as_object_mut) {
+        scope.remove(package);
+    }
+
+    if let Some(ignored) = cfg
+        .get_mut("ignoredPackagesForPresets")
+        .and_then(Value::as_array_mut)
+    {
+        let already = ignored.iter().any(|v| v.as_str() == Some(package));
+        if !already {
+            ignored.push(serde_json::json!(package));
+        }
+    }
+
+    write_config(&hma_dir, &cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+fn resolve_hidden_uids_for_app(
+    target_pkg: &str,
+    target_uid: u32,
+    app_cfg: &Value,
+    templates: Option<&serde_json::Map<String, Value>>,
+    all_packages: &HashMap<String, u32>,
+    system_packages: &HashSet<String>,
+) -> Vec<u32> {
+    let use_whitelist = app_cfg
+        .get("useWhitelist")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let exclude_system = app_cfg
+        .get("excludeSystemApps")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    let mut listed_pkgs: HashSet<String> = HashSet::new();
+    if let Some(extra) = app_cfg.get("extraAppList").and_then(Value::as_array) {
+        for item in extra {
+            if let Some(pkg) = item.as_str() {
+                listed_pkgs.insert(pkg.to_string());
+            }
+        }
+    }
+
+    if let (Some(tpl_map), Some(applied)) = (
+        templates,
+        app_cfg.get("applyTemplates").and_then(Value::as_array),
+    ) {
+        for tpl_name in applied.iter().filter_map(Value::as_str) {
+            if let Some(tpl) = tpl_map.get(tpl_name) {
+                let tpl_whitelist = tpl
+                    .get("isWhitelist")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                if tpl_whitelist == use_whitelist
+                    && let Some(app_list) = tpl.get("appList").and_then(Value::as_array)
+                {
+                    for pkg in app_list.iter().filter_map(Value::as_str) {
+                        listed_pkgs.insert(pkg.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut hidden_uids: HashSet<u32> = HashSet::new();
+    if use_whitelist {
+        for (pkg, &uid) in all_packages {
+            if pkg == target_pkg || uid == target_uid || listed_pkgs.contains(pkg) {
+                continue;
+            }
+            if exclude_system && system_packages.contains(pkg) {
+                continue;
+            }
+            hidden_uids.insert(uid);
+        }
+    } else {
+        for pkg in &listed_pkgs {
+            if let Some(&uid) = all_packages.get(pkg)
+                && uid != target_uid
+            {
+                hidden_uids.insert(uid);
+            }
+        }
+    }
+
+    let mut uids: Vec<u32> = hidden_uids.into_iter().collect();
+    uids.sort_unstable();
+    uids.truncate(128);
+    uids
+}
+
 /// Automatically harmonizes HMA hide list with root-granted applications,
-/// hiding them from all non-system, non-root applications via Seccomp UID filter and PMS hooks.
+/// while preserving manual scope/template/isolation customizations in config.json.
 pub fn sync_uid_scope() -> Result<usize> {
     let Some(boot_id) = get_boot_id() else {
         anyhow::bail!("Failed to read kernel boot_id from /proc/sys/kernel/random/boot_id");
@@ -197,15 +460,14 @@ pub fn sync_uid_scope() -> Result<usize> {
     ensure_dir_exists(&uid_scope_dir)?;
 
     let root_granted_uids = get_root_granted_uids();
-    let mut hidden_uids: HashSet<u32> = HashSet::new();
     let mut hidden_packages: HashSet<String> = HashSet::new();
 
     for pkg in PRESET_HIDDEN_PACKAGES {
         hidden_packages.insert((*pkg).to_string());
     }
 
-    // Map installed packages from /data/system/packages.list
     let mut all_packages: HashMap<String, u32> = HashMap::new();
+    let mut system_packages: HashSet<String> = HashSet::new();
     let mut user_non_root_apps: Vec<(String, u32)> = Vec::new();
 
     let packages_list_path = Path::new("/data/system/packages.list");
@@ -218,16 +480,19 @@ pub fn sync_uid_scope() -> Result<usize> {
                     all_packages.insert(pkg_name.to_string(), uid);
                     let data_dir = parts[3];
 
+                    let is_user_range = (10000..=19999).contains(&uid)
+                        && (data_dir.starts_with("/data/user/")
+                            || data_dir.starts_with("/data/data/"));
+                    if !is_user_range {
+                        system_packages.insert(pkg_name.to_string());
+                    }
+
                     let is_root_granted = root_granted_uids.contains(&uid);
                     let is_preset_hidden = PRESET_HIDDEN_PACKAGES.contains(&pkg_name);
 
                     if is_root_granted || is_preset_hidden {
-                        hidden_uids.insert(uid);
                         hidden_packages.insert(pkg_name.to_string());
-                    } else if (10000..=19999).contains(&uid)
-                        && (data_dir.starts_with("/data/user/")
-                            || data_dir.starts_with("/data/data/"))
-                    {
+                    } else if is_user_range {
                         user_non_root_apps.push((pkg_name.to_string(), uid));
                     }
                 }
@@ -235,66 +500,15 @@ pub fn sync_uid_scope() -> Result<usize> {
         }
     }
 
-    // Ensure all root granted UIDs are in hidden_uids
-    for uid in &root_granted_uids {
-        hidden_uids.insert(*uid);
-    }
+    let mut config_obj = read_or_init_config(&hma_dir);
+    let mut hidden_packages_vec: Vec<String> = hidden_packages.into_iter().collect();
+    hidden_packages_vec.sort();
 
-    let mut hidden_uid_list: Vec<u32> = hidden_uids.into_iter().collect();
-    hidden_uid_list.sort_unstable();
-    hidden_uid_list.truncate(128); // HMA-OSS-UID max limit per rule file
-
-    let generation = "g0";
-    let gen_dir = uid_scope_dir.join(generation);
-    ensure_dir_exists(&gen_dir)?;
-
-    // 1. Generate UID Seccomp scope rule files for non-root target applications
-    let mut synced_count = 0;
-    for (_pkg, target_uid) in &user_non_root_apps {
-        let app_hidden: Vec<u32> = hidden_uid_list
-            .iter()
-            .copied()
-            .filter(|&h_uid| h_uid != *target_uid)
-            .collect();
-
-        if app_hidden.is_empty() {
-            continue;
-        }
-
-        let mut content = format!("HMA_UID_3\n{target_uid}\n");
-        for h_uid in app_hidden {
-            content.push_str(&format!("{h_uid}\n"));
-        }
-
-        let rule_path = gen_dir.join(target_uid.to_string());
-        if fs::write(&rule_path, content).is_ok() {
-            synced_count += 1;
-        }
-    }
-
-    // 2. Write active marker
-    let active_content = format!("{boot_id} {generation}\n");
-    let active_path = uid_scope_dir.join("active");
-    fs::write(&active_path, active_content)
-        .with_context(|| format!("Failed to write {}", active_path.display()))?;
-
-    // 3. Write/Update HMA config.json for system_server Package Manager hooks
-    let config_path = hma_dir.join("config.json");
-    let mut config_obj = if let Ok(existing_bytes) = fs::read(&config_path) {
-        serde_json::from_slice::<serde_json::Value>(&existing_bytes)
-            .unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
-
-    config_obj["configVersion"] = serde_json::json!(95);
-    config_obj["uidFilterEnabled"] = serde_json::json!(true);
-    config_obj["uidFilterRevision"] = serde_json::json!(3);
-    config_obj["forceMountData"] = serde_json::json!(true);
-    config_obj["skipSystemAppDataIsolation"] = serde_json::json!(true);
-
-    let hidden_packages_vec: Vec<String> = hidden_packages.into_iter().collect();
-    if config_obj.get("templates").is_none() {
+    if config_obj
+        .get("templates")
+        .and_then(Value::as_object)
+        .is_none()
+    {
         config_obj["templates"] = serde_json::json!({});
     }
     config_obj["templates"]["baka_root_preset"] = serde_json::json!({
@@ -302,31 +516,111 @@ pub fn sync_uid_scope() -> Result<usize> {
         "appList": hidden_packages_vec
     });
 
-    if config_obj.get("scope").is_none() {
+    let ignored: HashSet<String> = config_obj
+        .get("ignoredPackagesForPresets")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if config_obj.get("scope").and_then(Value::as_object).is_none() {
         config_obj["scope"] = serde_json::json!({});
     }
-
-    let scope_map = config_obj["scope"].as_object_mut();
-    if let Some(scope) = scope_map {
+    if let Some(scope) = config_obj.get_mut("scope").and_then(Value::as_object_mut) {
         for (pkg, _uid) in &user_non_root_apps {
-            scope.insert(
-                pkg.clone(),
-                serde_json::json!({
-                    "useWhitelist": false,
-                    "applyTemplates": ["baka_root_preset"]
-                }),
-            );
+            if !scope.contains_key(pkg) && !ignored.contains(pkg) {
+                scope.insert(
+                    pkg.clone(),
+                    serde_json::json!({
+                        "useWhitelist": false,
+                        "applyTemplates": ["baka_root_preset"]
+                    }),
+                );
+            }
         }
     }
 
-    if let Ok(pretty_config) = serde_json::to_string_pretty(&config_obj) {
-        let _ = fs::write(&config_path, pretty_config);
+    let _ = write_config(&hma_dir, &config_obj);
+
+    let uid_filter_enabled = is_enabled()
+        && config_obj
+            .get("uidFilterEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+
+    let active_path = uid_scope_dir.join("active");
+    if !uid_filter_enabled {
+        if active_path.exists() {
+            let _ = fs::remove_file(&active_path);
+        }
+        info!("HMA UID Seccomp filter disabled via config; PMS config.json updated");
+        return Ok(0);
     }
 
+    let generation = "g0";
+    let gen_dir = uid_scope_dir.join(generation);
+    ensure_dir_exists(&gen_dir)?;
+
+    let templates_map = config_obj.get("templates").and_then(Value::as_object);
+    let mut synced_uids: HashSet<String> = HashSet::new();
+    let mut synced_count = 0;
+
+    if let Some(scope_map) = config_obj.get("scope").and_then(Value::as_object) {
+        for (target_pkg, app_cfg) in scope_map {
+            let Some(&target_uid) = all_packages.get(target_pkg) else {
+                continue;
+            };
+
+            let app_hidden = resolve_hidden_uids_for_app(
+                target_pkg,
+                target_uid,
+                app_cfg,
+                templates_map,
+                &all_packages,
+                &system_packages,
+            );
+
+            if app_hidden.is_empty() {
+                continue;
+            }
+
+            let mut content = format!("HMA_UID_3\n{target_uid}\n");
+            for h_uid in app_hidden {
+                content.push_str(&format!("{h_uid}\n"));
+            }
+
+            let uid_str = target_uid.to_string();
+            let rule_path = gen_dir.join(&uid_str);
+            if fs::write(&rule_path, content).is_ok() {
+                synced_uids.insert(uid_str);
+                synced_count += 1;
+            }
+        }
+    }
+
+    if let Ok(entries) = fs::read_dir(&gen_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && !synced_uids.contains(name)
+            {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+
+    let active_content = format!("{boot_id} {generation}\n");
+    fs::write(&active_path, active_content)
+        .with_context(|| format!("Failed to write {}", active_path.display()))?;
+
     info!(
-        "HMA auto-isolation synced: {} target apps protected from {} root/preset apps",
-        synced_count,
-        hidden_uid_list.len()
+        "HMA hybrid isolation synced: {} target apps protected",
+        synced_count
     );
 
     Ok(synced_count)

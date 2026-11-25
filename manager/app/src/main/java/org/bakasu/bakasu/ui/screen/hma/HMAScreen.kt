@@ -1,5 +1,6 @@
 package org.bakasu.bakasu.ui.screen.hma
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -7,6 +8,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.twotone.ArrowBack
 import androidx.compose.material.icons.twotone.Apps
+import androidx.compose.material.icons.twotone.BugReport
+import androidx.compose.material.icons.twotone.FolderShared
+import androidx.compose.material.icons.twotone.Lock
 import androidx.compose.material.icons.twotone.Security
 import androidx.compose.material.icons.twotone.Shield
 import androidx.compose.material.icons.twotone.Sync
@@ -16,13 +20,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -36,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.R
+import org.bakasu.bakasu.data.packageinfo.InstalledPackageRepository
 import org.bakasu.bakasu.data.shell.KsuCliRepository
 import org.bakasu.bakasu.ui.component.SwipeableSnackbarHost
 import org.bakasu.bakasu.ui.component.settings.SegmentedColumn
@@ -53,60 +62,78 @@ import org.koin.compose.koinInject
 fun HMAScreen() {
     val navigator = LocalNavigator.current
     val ksuCli = koinInject<KsuCliRepository>()
+    val packageRepo = koinInject<InstalledPackageRepository>()
+    val installedPackages by packageRepo.packages.collectAsState()
     val snackBarHost = LocalSnackbarHost.current
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
-    var isHmaEnabled by remember { mutableStateOf(true) }
-    var isHmaInstalled by remember { mutableStateOf(false) }
-    var hmaVersion by remember { mutableStateOf("177-UID3.1") }
-    var isUidScopeReady by remember { mutableStateOf(false) }
-    var scopedAppsCount by remember { mutableStateOf(0) }
-    var rootGrantedHiddenCount by remember { mutableStateOf(0) }
-    var activeGeneration by remember { mutableStateOf("") }
-    var isChecking by remember { mutableStateOf(true) }
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var hmaStatus by remember { mutableStateOf(KsuCliRepository.HmaStatus()) }
+    var hmaConfig by remember { mutableStateOf(KsuCliRepository.HmaConfig()) }
 
-    fun refreshStatus() {
+    fun refreshAll() {
         scope.launch(Dispatchers.IO) {
-            isChecking = true
             val status = ksuCli.getHmaStatus()
+            val config = ksuCli.getHmaConfig()
             withContext(Dispatchers.Main) {
-                if (status != null) {
-                    isHmaEnabled = status.enabled
-                    isHmaInstalled = status.installed
-                    hmaVersion = status.version.ifEmpty { "177-UID3.1" }
-                    isUidScopeReady = status.uid_scope_ready
-                    scopedAppsCount = status.scoped_apps_count
-                    rootGrantedHiddenCount = status.root_granted_hidden_count
-                    activeGeneration = status.active_generation
-                }
-                isChecking = false
+                if (status != null) hmaStatus = status
+                if (config != null) hmaConfig = config
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        refreshStatus()
+    fun updateConfigOption(key: String, value: Boolean, label: String) {
+        scope.launch(Dispatchers.IO) {
+            val ok = ksuCli.setHmaConfigOption(key, value)
+            snackBarHost.showReplacingSnackbar(
+                if (ok) "$label ${if (value) "enabled" else "disabled"}" else "Failed to update $label",
+            )
+            refreshAll()
+        }
     }
+
+    LaunchedEffect(Unit) {
+        refreshAll()
+        if (installedPackages.isEmpty()) {
+            packageRepo.refresh()
+        }
+    }
+
+    val tabs = listOf("Settings", "App Scope", "Templates")
 
     Scaffold(
         topBar = {
-            LargeFlexibleTopAppBar(
-                title = { Text(stringResource(R.string.settings_hma_title)) },
-                navigationIcon = {
-                    IconButton(onClick = { navigator.pop() }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.TwoTone.ArrowBack,
-                            contentDescription = null,
+            Column {
+                LargeFlexibleTopAppBar(
+                    title = { Text(stringResource(R.string.settings_hma_title)) },
+                    navigationIcon = {
+                        IconButton(onClick = { navigator.pop() }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.TwoTone.ArrowBack,
+                                contentDescription = null,
+                            )
+                        }
+                    },
+                    scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent,
+                    ),
+                )
+                PrimaryTabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = Color.Transparent,
+                ) {
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            text = { Text(title) },
                         )
                     }
-                },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent,
-                ),
-            )
+                }
+            }
         },
         snackbarHost = {
             SwipeableSnackbarHost(hostState = snackBarHost)
@@ -115,127 +142,284 @@ fun HMAScreen() {
         contentColor = MaterialTheme.colorScheme.onSurface,
         contentWindowInsets = adaptiveScaffoldWindowInsets(includeBottom = false),
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .nestedScroll(scrollBehavior.nestedScrollConnection)
-                .blurSource()
-                .padding(horizontal = 0.dp),
-            contentPadding = PaddingValues(
-                top = innerPadding.calculateTopPadding() + 5.dp,
-                bottom = innerPadding.calculateBottomPadding() + 20.dp,
-            ),
-        ) {
-            item {
-                SegmentedColumn(
-                    title = "HMA & UID Control",
-                    content = {
-                        item {
-                            SettingsSwitchWidget(
-                                icon = Icons.TwoTone.VisibilityOff,
-                                title = stringResource(R.string.hma_enable_title),
-                                description = stringResource(R.string.hma_enable_summary),
-                                checked = isHmaEnabled,
-                                onCheckedChange = { checked ->
-                                    isHmaEnabled = checked
-                                    scope.launch(Dispatchers.IO) {
-                                        val ok = ksuCli.setHmaEnabled(checked)
-                                        snackBarHost.showReplacingSnackbar(
-                                            if (ok) {
-                                                if (checked) "HMA OSS + UID enabled" else "HMA OSS + UID disabled"
-                                            } else {
-                                                "Failed to toggle HMA"
-                                            },
-                                        )
-                                        refreshStatus()
-                                    }
-                                },
-                            )
-                        }
+        val listPadding = PaddingValues(
+            top = innerPadding.calculateTopPadding() + 5.dp,
+            bottom = innerPadding.calculateBottomPadding() + 20.dp,
+        )
 
-                        item {
-                            SettingsBaseWidget(
-                                icon = Icons.TwoTone.Sync,
-                                title = stringResource(R.string.hma_sync_action),
-                                description = stringResource(R.string.hma_sync_summary),
-                                onClick = {
-                                    scope.launch(Dispatchers.IO) {
-                                        val ok = ksuCli.syncHmaUidRules()
-                                        snackBarHost.showReplacingSnackbar(
-                                            if (ok) "HMA UID rules synchronized successfully" else "Failed to sync HMA UID rules",
-                                        )
-                                        refreshStatus()
-                                    }
-                                },
-                            )
-                        }
-                    },
-                )
-            }
+        when (selectedTab) {
+            0 -> HmaOverviewTab(
+                hmaStatus = hmaStatus,
+                hmaConfig = hmaConfig,
+                contentPadding = listPadding,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection)
+                    .blurSource(),
+                onToggleHma = { checked ->
+                    hmaStatus = hmaStatus.copy(enabled = checked)
+                    scope.launch(Dispatchers.IO) {
+                        val ok = ksuCli.setHmaEnabled(checked)
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) {
+                                if (checked) "HMA OSS + UID enabled" else "HMA OSS + UID disabled"
+                            } else {
+                                "Failed to toggle HMA"
+                            },
+                        )
+                        refreshAll()
+                    }
+                },
+                onSyncRules = {
+                    scope.launch(Dispatchers.IO) {
+                        val ok = ksuCli.syncHmaUidRules()
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) "HMA hybrid rules synchronized" else "Failed to sync HMA rules",
+                        )
+                        refreshAll()
+                    }
+                },
+                onToggleConfig = { key, value, label ->
+                    hmaConfig = when (key) {
+                        "uidFilterEnabled" -> hmaConfig.copy(uidFilterEnabled = value)
+                        "forceMountData" -> hmaConfig.copy(forceMountData = value)
+                        "skipSystemAppDataIsolation" -> hmaConfig.copy(skipSystemAppDataIsolation = value)
+                        "altAppDataIsolation" -> hmaConfig.copy(altAppDataIsolation = value)
+                        "altVoldAppDataIsolation" -> hmaConfig.copy(altVoldAppDataIsolation = value)
+                        "disableActivityLaunchProtection" -> hmaConfig.copy(disableActivityLaunchProtection = value)
+                        "detailLog" -> hmaConfig.copy(detailLog = value)
+                        "errorOnlyLog" -> hmaConfig.copy(errorOnlyLog = value)
+                        else -> hmaConfig
+                    }
+                    updateConfigOption(key, value, label)
+                },
+            )
 
-            item {
-                SegmentedColumn(
-                    title = stringResource(R.string.hma_status_card_title),
-                    content = {
-                        item {
-                            SettingsBaseWidget(
-                                icon = Icons.TwoTone.Shield,
-                                title = stringResource(R.string.hma_engine_status),
-                                description = if (isHmaInstalled) {
-                                    "Built-in Zygisk Module ($hmaVersion)"
-                                } else {
-                                    stringResource(R.string.hma_status_disabled)
-                                },
-                            )
+            1 -> HmaAppScopeTab(
+                config = hmaConfig,
+                installedPackages = installedPackages,
+                contentPadding = listPadding,
+                onUpdateScope = { enabled, updatedScope ->
+                    scope.launch(Dispatchers.IO) {
+                        val ok = if (enabled) {
+                            ksuCli.setHmaAppScope(updatedScope)
+                        } else {
+                            ksuCli.removeHmaAppScope(updatedScope.packageName)
                         }
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) {
+                                "Updated scope for ${updatedScope.packageName}"
+                            } else {
+                                "Failed to update app scope"
+                            },
+                        )
+                        refreshAll()
+                    }
+                },
+            )
 
-                        item {
-                            SettingsBaseWidget(
-                                icon = Icons.TwoTone.Security,
-                                title = stringResource(R.string.hma_uid_filter_status),
-                                description = if (isUidScopeReady) {
-                                    "${stringResource(R.string.hma_status_ready)} (${if (activeGeneration.isNotEmpty()) activeGeneration else "g0"})"
-                                } else if (isHmaEnabled) {
-                                    stringResource(R.string.hma_status_active)
-                                } else {
-                                    stringResource(R.string.hma_status_disabled)
-                                },
-                            )
-                        }
+            2 -> HmaTemplatesTab(
+                config = hmaConfig,
+                installedPackages = installedPackages,
+                contentPadding = listPadding,
+                onSaveTemplate = { name, isWhitelist, apps ->
+                    scope.launch(Dispatchers.IO) {
+                        val ok = ksuCli.setHmaTemplate(name, isWhitelist, apps)
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) "Template '$name' saved" else "Failed to save template",
+                        )
+                        refreshAll()
+                    }
+                },
+                onDeleteTemplate = { name ->
+                    scope.launch(Dispatchers.IO) {
+                        val ok = ksuCli.deleteHmaTemplate(name)
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) "Template '$name' deleted" else "Failed to delete template",
+                        )
+                        refreshAll()
+                    }
+                },
+            )
+        }
+    }
+}
 
-                        item {
-                            SettingsBaseWidget(
-                                icon = Icons.TwoTone.Apps,
-                                title = stringResource(R.string.hma_scoped_apps_count),
-                                description = "$scopedAppsCount apps configured with UID seccomp filter",
-                            )
-                        }
-                    },
-                )
-            }
+@Composable
+private fun HmaOverviewTab(
+    hmaStatus: KsuCliRepository.HmaStatus,
+    hmaConfig: KsuCliRepository.HmaConfig,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    onToggleHma: (Boolean) -> Unit,
+    onSyncRules: () -> Unit,
+    onToggleConfig: (key: String, value: Boolean, label: String) -> Unit,
+) {
+    val version = hmaStatus.version.ifEmpty { "177-UID3.1" }
+    val gen = hmaStatus.active_generation.ifEmpty { "g0" }
 
-            item {
-                SegmentedColumn(
-                    title = stringResource(R.string.hma_preset_title),
-                    content = {
-                        item {
-                            SettingsBaseWidget(
-                                icon = Icons.TwoTone.Shield,
-                                title = stringResource(R.string.hma_preset_title),
-                                description = stringResource(R.string.hma_preset_summary),
-                            )
-                        }
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 0.dp),
+        contentPadding = contentPadding,
+    ) {
+        item {
+            SegmentedColumn(
+                title = "HMA & UID Control",
+                content = {
+                    item {
+                        SettingsSwitchWidget(
+                            icon = Icons.TwoTone.VisibilityOff,
+                            title = stringResource(R.string.hma_enable_title),
+                            description = stringResource(R.string.hma_enable_summary),
+                            checked = hmaStatus.enabled,
+                            onCheckedChange = onToggleHma,
+                        )
+                    }
+                    item {
+                        SettingsSwitchWidget(
+                            icon = Icons.TwoTone.Security,
+                            title = "UID Seccomp Filter",
+                            description = "Isolate hidden UIDs at kernel seccomp level (HMA-OSS-UID)",
+                            checked = hmaConfig.uidFilterEnabled,
+                            onCheckedChange = { onToggleConfig("uidFilterEnabled", it, "UID Seccomp Filter") },
+                        )
+                    }
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.TwoTone.Sync,
+                            title = stringResource(R.string.hma_sync_action),
+                            description = stringResource(R.string.hma_sync_summary),
+                            onClick = onSyncRules,
+                        )
+                    }
+                },
+            )
+        }
 
-                        item {
-                            SettingsBaseWidget(
-                                icon = Icons.TwoTone.Apps,
-                                title = stringResource(R.string.hma_root_hidden_count),
-                                description = "$rootGrantedHiddenCount root applications isolated from target non-root apps",
-                            )
-                        }
-                    },
-                )
-            }
+        item {
+            SegmentedColumn(
+                title = "Data Isolation & Protection",
+                content = {
+                    item {
+                        SettingsSwitchWidget(
+                            icon = Icons.TwoTone.FolderShared,
+                            title = "Force Mount Data",
+                            description = "Enforce Android 11+ scoped app data isolation",
+                            checked = hmaConfig.forceMountData,
+                            onCheckedChange = { onToggleConfig("forceMountData", it, "Force Mount Data") },
+                        )
+                    }
+                    item {
+                        SettingsSwitchWidget(
+                            icon = Icons.TwoTone.Shield,
+                            title = "Skip System App Isolation",
+                            description = "Avoid bootloops by skipping vold isolation for system apps",
+                            checked = hmaConfig.skipSystemAppDataIsolation,
+                            onCheckedChange = {
+                                onToggleConfig("skipSystemAppDataIsolation", it, "Skip System App Isolation")
+                            },
+                        )
+                    }
+                    item {
+                        SettingsSwitchWidget(
+                            icon = Icons.TwoTone.FolderShared,
+                            title = "Alternative AppData Isolation",
+                            description = "Use propless appdata isolation mechanism",
+                            checked = hmaConfig.altAppDataIsolation,
+                            onCheckedChange = {
+                                onToggleConfig("altAppDataIsolation", it, "Alternative AppData Isolation")
+                            },
+                        )
+                    }
+                    item {
+                        SettingsSwitchWidget(
+                            icon = Icons.TwoTone.FolderShared,
+                            title = "Alternative Vold Isolation",
+                            description = "Use propless vold appdata isolation",
+                            checked = hmaConfig.altVoldAppDataIsolation,
+                            onCheckedChange = {
+                                onToggleConfig("altVoldAppDataIsolation", it, "Alternative Vold Isolation")
+                            },
+                        )
+                    }
+                    item {
+                        SettingsSwitchWidget(
+                            icon = Icons.TwoTone.Lock,
+                            title = "Activity Launch Protection",
+                            description = "Block target apps from launching hidden apps",
+                            checked = !hmaConfig.disableActivityLaunchProtection,
+                            onCheckedChange = { enabled ->
+                                onToggleConfig("disableActivityLaunchProtection", !enabled, "Activity Launch Protection")
+                            },
+                        )
+                    }
+                },
+            )
+        }
+
+        item {
+            SegmentedColumn(
+                title = "Logging",
+                content = {
+                    item {
+                        SettingsSwitchWidget(
+                            icon = Icons.TwoTone.BugReport,
+                            title = "Detailed Logging",
+                            description = "Enable verbose HMA hook diagnostics",
+                            checked = hmaConfig.detailLog,
+                            onCheckedChange = { onToggleConfig("detailLog", it, "Detailed Logging") },
+                        )
+                    }
+                    item {
+                        SettingsSwitchWidget(
+                            icon = Icons.TwoTone.BugReport,
+                            title = "Error-Only Logging",
+                            description = "Restrict HMA log channels to errors only",
+                            checked = hmaConfig.errorOnlyLog,
+                            onCheckedChange = { onToggleConfig("errorOnlyLog", it, "Error-Only Logging") },
+                        )
+                    }
+                },
+            )
+        }
+
+        item {
+            SegmentedColumn(
+                title = stringResource(R.string.hma_status_card_title),
+                content = {
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.TwoTone.Shield,
+                            title = stringResource(R.string.hma_engine_status),
+                            description = if (hmaStatus.installed) {
+                                "Built-in Zygisk Module ($version)"
+                            } else {
+                                stringResource(R.string.hma_status_disabled)
+                            },
+                        )
+                    }
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.TwoTone.Security,
+                            title = stringResource(R.string.hma_uid_filter_status),
+                            description = if (hmaStatus.uid_scope_ready) {
+                                "${stringResource(R.string.hma_status_ready)} ($gen)"
+                            } else if (hmaStatus.enabled) {
+                                stringResource(R.string.hma_status_active)
+                            } else {
+                                stringResource(R.string.hma_status_disabled)
+                            },
+                        )
+                    }
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.TwoTone.Apps,
+                            title = stringResource(R.string.hma_scoped_apps_count),
+                            description = "${hmaStatus.scoped_apps_count} apps active in UID seccomp • ${hmaStatus.root_granted_hidden_count} root UIDs isolated",
+                        )
+                    }
+                },
+            )
         }
     }
 }

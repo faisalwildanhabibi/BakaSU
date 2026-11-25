@@ -361,6 +361,51 @@ pub enum HmaCommand {
     Status,
     /// Synchronize UID scope rules for active target apps
     Sync,
+    /// Read or update HMA global config (`config.json`)
+    Config {
+        #[command(subcommand)]
+        command: HmaConfigCommand,
+    },
+    /// Manage HMA hide templates
+    Template {
+        #[command(subcommand)]
+        command: HmaTemplateCommand,
+    },
+    /// Manage per-app HMA scope rules
+    Scope {
+        #[command(subcommand)]
+        command: HmaScopeCommand,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum HmaConfigCommand {
+    /// Print full HMA config.json
+    Get,
+    /// Set one global config option, e.g. `ksud hma config set forceMountData true`
+    Set { key: String, value: String },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum HmaTemplateCommand {
+    /// Create or update a template
+    Set {
+        name: String,
+        #[arg(long)]
+        whitelist: bool,
+        #[arg(default_value = "")]
+        apps: String,
+    },
+    /// Delete a template
+    Delete { name: String },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum HmaScopeCommand {
+    /// Set or update an app's scope config as JSON
+    Set { package: String, config_json: String },
+    /// Remove an app from scope and add to ignoredPackagesForPresets
+    Remove { package: String },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -1399,6 +1444,48 @@ pub fn run() -> Result<()> {
                 );
                 Ok(())
             }
+            HmaCommand::Config { command } => match command {
+                HmaConfigCommand::Get => {
+                    println!("{}", crate::android::hma::get_config_json()?);
+                    Ok(())
+                }
+                HmaConfigCommand::Set { key, value } => {
+                    crate::android::hma::set_config_key(&key, &value)?;
+                    println!("true");
+                    Ok(())
+                }
+            },
+            HmaCommand::Template { command } => match command {
+                HmaTemplateCommand::Set {
+                    name,
+                    whitelist,
+                    apps,
+                } => {
+                    crate::android::hma::set_template(&name, whitelist, &apps)?;
+                    println!("true");
+                    Ok(())
+                }
+                HmaTemplateCommand::Delete { name } => {
+                    crate::android::hma::delete_template(&name)?;
+                    println!("true");
+                    Ok(())
+                }
+            },
+            HmaCommand::Scope { command } => match command {
+                HmaScopeCommand::Set {
+                    package,
+                    config_json,
+                } => {
+                    crate::android::hma::set_scope(&package, &config_json)?;
+                    println!("true");
+                    Ok(())
+                }
+                HmaScopeCommand::Remove { package } => {
+                    crate::android::hma::remove_scope(&package)?;
+                    println!("true");
+                    Ok(())
+                }
+            },
         },
     };
 

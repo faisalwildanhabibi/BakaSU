@@ -844,4 +844,156 @@ class KsuCliRepository(context: Context) {
     }
 
     fun syncHmaUidRules(): Boolean = execKsud("hma sync", true)
+
+    data class HmaTemplate(
+        val name: String,
+        val isWhitelist: Boolean = false,
+        val appList: List<String> = emptyList(),
+    )
+
+    data class HmaAppScope(
+        val packageName: String,
+        val useWhitelist: Boolean = false,
+        val excludeSystemApps: Boolean = true,
+        val hideInstallationSource: Boolean = false,
+        val hideSystemInstallationSource: Boolean = false,
+        val excludeTargetInstallationSource: Boolean = false,
+        val invertActivityLaunchProtection: Boolean = false,
+        val applyTemplates: List<String> = emptyList(),
+        val extraAppList: List<String> = emptyList(),
+    )
+
+    data class HmaConfig(
+        val uidFilterEnabled: Boolean = true,
+        val forceMountData: Boolean = true,
+        val skipSystemAppDataIsolation: Boolean = true,
+        val altAppDataIsolation: Boolean = false,
+        val altVoldAppDataIsolation: Boolean = false,
+        val disableActivityLaunchProtection: Boolean = false,
+        val detailLog: Boolean = false,
+        val errorOnlyLog: Boolean = false,
+        val templates: Map<String, HmaTemplate> = emptyMap(),
+        val scope: Map<String, HmaAppScope> = emptyMap(),
+        val ignoredPackages: Set<String> = emptySet(),
+    )
+
+    private fun shellQuote(arg: String): String = "'${arg.replace("'", "'\\''")}'"
+
+    fun getHmaConfig(): HmaConfig? {
+        val out = runCmd(getRootShell(), "${getKsuDaemonPath()} hma config get").trim()
+        if (out.isEmpty() || !out.startsWith("{")) return null
+        return try {
+            val json = org.json.JSONObject(out)
+            val templatesMap = linkedMapOf<String, HmaTemplate>()
+            val tplObj = json.optJSONObject("templates")
+            if (tplObj != null) {
+                val keys = tplObj.keys()
+                while (keys.hasNext()) {
+                    val name = keys.next()
+                    val t = tplObj.optJSONObject(name) ?: continue
+                    val apps = mutableListOf<String>()
+                    val arr = t.optJSONArray("appList")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            arr.optString(i).takeIf { it.isNotEmpty() }?.let { apps.add(it) }
+                        }
+                    }
+                    templatesMap[name] = HmaTemplate(
+                        name = name,
+                        isWhitelist = t.optBoolean("isWhitelist", false),
+                        appList = apps,
+                    )
+                }
+            }
+
+            val scopeMap = linkedMapOf<String, HmaAppScope>()
+            val scopeObj = json.optJSONObject("scope")
+            if (scopeObj != null) {
+                val keys = scopeObj.keys()
+                while (keys.hasNext()) {
+                    val pkg = keys.next()
+                    val s = scopeObj.optJSONObject(pkg) ?: continue
+                    val applied = mutableListOf<String>()
+                    val tplArr = s.optJSONArray("applyTemplates")
+                    if (tplArr != null) {
+                        for (i in 0 until tplArr.length()) {
+                            tplArr.optString(i).takeIf { it.isNotEmpty() }?.let { applied.add(it) }
+                        }
+                    }
+                    val extra = mutableListOf<String>()
+                    val extraArr = s.optJSONArray("extraAppList")
+                    if (extraArr != null) {
+                        for (i in 0 until extraArr.length()) {
+                            extraArr.optString(i).takeIf { it.isNotEmpty() }?.let { extra.add(it) }
+                        }
+                    }
+                    scopeMap[pkg] = HmaAppScope(
+                        packageName = pkg,
+                        useWhitelist = s.optBoolean("useWhitelist", false),
+                        excludeSystemApps = s.optBoolean("excludeSystemApps", true),
+                        hideInstallationSource = s.optBoolean("hideInstallationSource", false),
+                        hideSystemInstallationSource = s.optBoolean("hideSystemInstallationSource", false),
+                        excludeTargetInstallationSource = s.optBoolean("excludeTargetInstallationSource", false),
+                        invertActivityLaunchProtection = s.optBoolean("invertActivityLaunchProtection", false),
+                        applyTemplates = applied,
+                        extraAppList = extra,
+                    )
+                }
+            }
+
+            val ignored = mutableSetOf<String>()
+            val ignoredArr = json.optJSONArray("ignoredPackagesForPresets")
+            if (ignoredArr != null) {
+                for (i in 0 until ignoredArr.length()) {
+                    ignoredArr.optString(i).takeIf { it.isNotEmpty() }?.let { ignored.add(it) }
+                }
+            }
+
+            HmaConfig(
+                uidFilterEnabled = json.optBoolean("uidFilterEnabled", true),
+                forceMountData = json.optBoolean("forceMountData", true),
+                skipSystemAppDataIsolation = json.optBoolean("skipSystemAppDataIsolation", true),
+                altAppDataIsolation = json.optBoolean("altAppDataIsolation", false),
+                altVoldAppDataIsolation = json.optBoolean("altVoldAppDataIsolation", false),
+                disableActivityLaunchProtection = json.optBoolean("disableActivityLaunchProtection", false),
+                detailLog = json.optBoolean("detailLog", false),
+                errorOnlyLog = json.optBoolean("errorOnlyLog", false),
+                templates = templatesMap,
+                scope = scopeMap,
+                ignoredPackages = ignored,
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse HMA config", e)
+            null
+        }
+    }
+
+    fun setHmaConfigOption(key: String, value: Boolean): Boolean =
+        execKsud("hma config set ${shellQuote(key)} $value", true)
+
+    fun setHmaTemplate(name: String, isWhitelist: Boolean, apps: List<String>): Boolean {
+        val wlFlag = if (isWhitelist) "--whitelist " else ""
+        val appsCsv = apps.joinToString(",")
+        return execKsud("hma template set $wlFlag${shellQuote(name)} ${shellQuote(appsCsv)}", true)
+    }
+
+    fun deleteHmaTemplate(name: String): Boolean =
+        execKsud("hma template delete ${shellQuote(name)}", true)
+
+    fun setHmaAppScope(appScope: HmaAppScope): Boolean {
+        val json = org.json.JSONObject().apply {
+            put("useWhitelist", appScope.useWhitelist)
+            put("excludeSystemApps", appScope.excludeSystemApps)
+            put("hideInstallationSource", appScope.hideInstallationSource)
+            put("hideSystemInstallationSource", appScope.hideSystemInstallationSource)
+            put("excludeTargetInstallationSource", appScope.excludeTargetInstallationSource)
+            put("invertActivityLaunchProtection", appScope.invertActivityLaunchProtection)
+            put("applyTemplates", org.json.JSONArray(appScope.applyTemplates))
+            put("extraAppList", org.json.JSONArray(appScope.extraAppList))
+        }
+        return execKsud("hma scope set ${shellQuote(appScope.packageName)} ${shellQuote(json.toString())}", true)
+    }
+
+    fun removeHmaAppScope(packageName: String): Boolean =
+        execKsud("hma scope remove ${shellQuote(packageName)}", true)
 }
