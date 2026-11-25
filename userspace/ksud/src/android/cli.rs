@@ -328,6 +328,8 @@ pub enum ZygiskCommand {
     Modules,
     /// Reload built-in Zygisk
     Rearm,
+    /// Synchronize all isolated/denylist UIDs to NoMount and enable block_isolated
+    NomountSync,
     /// Read or change BuiltZygisk options (`config.prop`)
     Config {
         #[command(subcommand)]
@@ -1209,6 +1211,17 @@ pub fn run() -> Result<()> {
                     .into_iter()
                     .map(|(abi, status)| serde_json::json!({ "abi": abi, "status": status }))
                     .collect();
+                let nm_active = crate::android::builtin_zygisk::is_nomount_active();
+                let nm_isolated_block = if nm_active {
+                    crate::android::builtin_zygisk::is_nomount_block_isolated()
+                } else {
+                    false
+                };
+                let nm_uids = if nm_active {
+                    crate::android::builtin_zygisk::nomount_isolated_uids()
+                } else {
+                    Vec::new()
+                };
                 println!(
                     "{}",
                     serde_json::json!({
@@ -1220,7 +1233,10 @@ pub fn run() -> Result<()> {
                         "version": version,
                         "version_code": version_code,
                         "zygotes": zy_states,
-                        "nomount_active": crate::android::builtin_zygisk::is_nomount_active(),
+                        "nomount_active": nm_active,
+                        "nomount_block_isolated": nm_isolated_block,
+                        "nomount_isolated_uids_count": nm_uids.len(),
+                        "nomount_isolated_uids": nm_uids,
                     })
                 );
                 Ok(())
@@ -1294,6 +1310,11 @@ pub fn run() -> Result<()> {
             }
             ZygiskCommand::Rearm => {
                 crate::android::builtin_zygisk::rearm()?;
+                println!("true");
+                Ok(())
+            }
+            ZygiskCommand::NomountSync => {
+                crate::android::builtin_zygisk::coordinate_nomount()?;
                 println!("true");
                 Ok(())
             }

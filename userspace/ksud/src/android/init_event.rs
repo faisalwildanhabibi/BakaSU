@@ -209,6 +209,7 @@ pub fn on_services() {
         if let Err(e) = crate::android::builtin_zygisk::ensure_armed() {
             warn!("ensure armed builtin zygisk failed: {e}");
         }
+        let _ = crate::android::builtin_zygisk::coordinate_nomount();
     }
 }
 

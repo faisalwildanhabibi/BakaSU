@@ -116,6 +116,53 @@ pub fn is_nomount_active() -> bool {
     dir.is_dir() && !dir.join(DISABLE_FILE_NAME).exists() && Path::new(NOMOUNT_BIN).exists()
 }
 
+/// Set NoMount isolated process blocking on or off (UIDs 90000-99999).
+pub fn set_nomount_block_isolated(enabled: bool) -> Result<()> {
+    if !is_nomount_active() {
+        return Ok(());
+    }
+    let arg = if enabled { "on" } else { "off" };
+    info!("Setting NoMount block_isolated {arg}");
+    let status = Command::new(NOMOUNT_BIN)
+        .args(["uid", "block_isolated", arg])
+        .status()
+        .with_context(|| format!("Failed to execute {NOMOUNT_BIN} uid block_isolated {arg}"))?;
+    if !status.success() {
+        warn!("NoMount uid block_isolated {arg} returned non-zero status: {status}");
+    }
+    Ok(())
+}
+
+/// Query NoMount isolated process blocking state.
+pub fn is_nomount_block_isolated() -> bool {
+    if !is_nomount_active() {
+        return false;
+    }
+    let output = Command::new(NOMOUNT_BIN)
+        .args(["uid", "block_isolated"])
+        .output();
+    if let Ok(out) = output {
+        let text = String::from_utf8_lossy(&out.stdout);
+        text.trim() == "1" || text.trim() == "on"
+    } else {
+        false
+    }
+}
+
+/// List isolated UIDs currently registered in NoMount.
+pub fn nomount_isolated_uids() -> Vec<u32> {
+    if !is_nomount_active() {
+        return Vec::new();
+    }
+    let Ok(output) = Command::new(NOMOUNT_BIN).args(["uid", "list"]).output() else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines()
+        .filter_map(|line| line.trim().parse::<u32>().ok())
+        .collect()
+}
+
 /// Coordinate with NoMount: register DenyList UID into NoMount VFS isolation bypass.
 pub fn sync_nomount_uid(uid: i32) -> Result<()> {
     if !is_nomount_active() {
@@ -130,6 +177,41 @@ pub fn sync_nomount_uid(uid: i32) -> Result<()> {
         warn!("NoMount uid add {uid} returned non-zero status: {status}");
     }
     Ok(())
+}
+
+/// Full orchestration with NoMount: enable isolated process blocking and sync denylist UIDs.
+pub fn coordinate_nomount() -> Result<()> {
+    if !is_nomount_active() {
+        return Ok(());
+    }
+
+    info!("Coordinating with NoMount VFS subsystem");
+    // 1. Enforce block_isolated on for Android isolated processes (UIDs 90000-99999)
+    if let Err(e) = set_nomount_block_isolated(true) {
+        warn!("Failed to enable NoMount block_isolated: {e}");
+    }
+
+    // 2. Synchronize configured app profiles / denylist UIDs
+    sync_all_configured_nomount_uids();
+
+    Ok(())
+}
+
+/// Read configured app profiles and register non-root UIDs to NoMount
+fn sync_all_configured_nomount_uids() {
+    let profile_dir = Path::new("/data/adb/ksu/profile");
+    if let Ok(entries) = fs::read_dir(profile_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if let Ok(uid) = name.parse::<i32>() {
+                        let _ = sync_nomount_uid(uid);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// `(pid, name)` of the processes running our own binaries out of the staging directory.
@@ -1394,6 +1476,9 @@ fn stage_assets(dir: &Path) {
 
     // SuSFS Coordination Registration
     coordinate_susfs();
+
+    // NoMount Coordination Registration
+    let _ = coordinate_nomount();
 }
 
 pub fn bootstrap() -> Result<()> {
