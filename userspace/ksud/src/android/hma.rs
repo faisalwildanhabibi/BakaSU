@@ -76,7 +76,7 @@ pub fn disable() -> Result<()> {
     let dir = Path::new(BUILTIN_HMA_DIR);
     if dir.exists() {
         let disable_file = dir.join(DISABLE_FILE_NAME);
-        ensure_file_exists(&disable_file.to_string_lossy())?;
+        ensure_file_exists(&disable_file)?;
     }
     info!("Built-in HMA OSS + UID has been disabled");
     Ok(())
@@ -225,7 +225,8 @@ pub fn sync_uid_scope() -> Result<usize> {
                         hidden_uids.insert(uid);
                         hidden_packages.insert(pkg_name.to_string());
                     } else if (10000..=19999).contains(&uid)
-                        && (data_dir.starts_with("/data/user/") || data_dir.starts_with("/data/data/"))
+                        && (data_dir.starts_with("/data/user/")
+                            || data_dir.starts_with("/data/data/"))
                     {
                         user_non_root_apps.push((pkg_name.to_string(), uid));
                     }
