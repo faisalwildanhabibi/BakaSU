@@ -3,6 +3,8 @@ name: Build Manager
 on:
   workflow_dispatch:
   push:
+    branches:
+      - custom/main
     paths:
       - '.github/workflows/build-manager.yml'
       - '.github/workflows/build-lkm.yml'
@@ -15,7 +17,13 @@ on:
       - 'userspace/**'
       - 'scripts/ksubot.py'
   pull_request:
+    branches:
+      - custom/main
   workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   prepare:
