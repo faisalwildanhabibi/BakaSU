@@ -108,13 +108,6 @@ pub fn on_post_fs_data() -> Result<()> {
     // Load susfs config entries that must capture metadata before mounts/overlays.
     crate::android::susfs::init_event::on_post_fs_data();
 
-    // Bootstrap built-in Zygisk if enabled
-    if crate::android::builtin_zygisk::is_enabled() {
-        if let Err(e) = crate::android::builtin_zygisk::bootstrap() {
-            warn!("bootstrap builtin zygisk failed: {e}");
-        }
-    }
-
     // execute metamodule post-fs-data script first (priority)
     if let Err(e) = metamodule::exec_stage_script("post-fs-data", wait) {
         warn!("exec metamodule post-fs-data script failed: {e}");
@@ -203,13 +196,6 @@ pub fn on_services() {
     // start the thermal / charge-limit watcher when needed
     if let Err(e) = crate::android::tuning::ensure_tuning_watch_running() {
         log::warn!("failed to start tuning watcher: {e:#}");
-    }
-
-    if crate::android::builtin_zygisk::is_enabled() {
-        if let Err(e) = crate::android::builtin_zygisk::ensure_armed() {
-            warn!("ensure armed builtin zygisk failed: {e}");
-        }
-        let _ = crate::android::builtin_zygisk::coordinate_nomount();
     }
 }
 

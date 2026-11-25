@@ -661,6 +661,7 @@ impl TuningWatchLock {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .mode(0o600)
             .open(path)
             .with_context(|| format!("failed to open {}", path.display()))?;
@@ -833,7 +834,7 @@ pub fn run_tuning_watch() -> Result<()> {
             }
         }
 
-        if tick % CHARGE_LIMIT_CHECK_TICKS == 0
+        if tick.is_multiple_of(CHARGE_LIMIT_CHECK_TICKS)
             && let Some(gate) = find_charge_gate()
         {
             apply_charge_limit(&config, &gate);
