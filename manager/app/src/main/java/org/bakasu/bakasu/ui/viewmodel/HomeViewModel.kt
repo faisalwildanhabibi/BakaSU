@@ -169,6 +169,7 @@ class HomeViewModel(
                                 securityPatch = basicInfo.securityPatch,
                                 zygiskRunning = ksuCliRepository.isBuiltinZygiskActive(),
                                 zygiskModulesCount = ksuCliRepository.getBuiltinZygiskModulesCount(),
+                                hmaActive = ksuCliRepository.getHmaStatus()?.let { it.enabled && it.uid_scope_ready } ?: false,
                             ),
                             isInitialDataLoaded = true,
                             isExtendedDataLoaded = true,

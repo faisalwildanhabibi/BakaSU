@@ -52,6 +52,7 @@ data class HomeSystemInfo(
     val securityPatch: String = "",
     val zygiskRunning: Boolean = false,
     val zygiskModulesCount: Int = 0,
+    val hmaActive: Boolean = false,
 )
 
 data class HomeDashboardState(

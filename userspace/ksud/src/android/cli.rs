@@ -186,6 +186,12 @@ enum Commands {
         #[command(subcommand)]
         command: ZygiskCommand,
     },
+
+    /// Manage built-in HMA OSS and UID isolation
+    Hma {
+        #[command(subcommand)]
+        command: HmaCommand,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -343,6 +349,18 @@ pub enum ZygiskConfigCommand {
     Get,
     /// Set one option, e.g. `ksud zygisk config set custom_linker 1`
     Set { key: String, value: String },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum HmaCommand {
+    /// Enable built-in HMA OSS + UID
+    On,
+    /// Disable built-in HMA OSS + UID
+    Off,
+    /// Report built-in HMA OSS + UID status as JSON
+    Status,
+    /// Synchronize UID scope rules for active target apps
+    Sync,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -1344,6 +1362,34 @@ pub fn run() -> Result<()> {
                     Ok(())
                 }
             },
+        },
+        Commands::Hma { command } => match command {
+            HmaCommand::On => {
+                crate::android::hma::enable()?;
+                println!("true");
+                Ok(())
+            }
+            HmaCommand::Off => {
+                crate::android::hma::disable()?;
+                println!("true");
+                Ok(())
+            }
+            HmaCommand::Status => {
+                let status = crate::android::hma::status();
+                println!("{}", serde_json::to_string_pretty(&status)?);
+                Ok(())
+            }
+            HmaCommand::Sync => {
+                let count = crate::android::hma::sync_uid_scope()?;
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": "success",
+                        "synced_rules": count,
+                    })
+                );
+                Ok(())
+            }
         },
     };
 

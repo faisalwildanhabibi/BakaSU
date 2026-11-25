@@ -3,6 +3,7 @@ pub mod cli;
 mod debug;
 mod dynamic_manager;
 mod feature;
+pub mod hma;
 mod hot_install;
 mod init_event;
 mod ksucalls;

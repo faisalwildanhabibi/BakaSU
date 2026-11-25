@@ -808,4 +808,41 @@ class KsuCliRepository(context: Context) {
             ""
         }
     }
+
+    data class HmaStatus(
+        val enabled: Boolean = false,
+        val installed: Boolean = false,
+        val version: String = "",
+        val uid_filter_active: Boolean = false,
+        val uid_scope_ready: Boolean = false,
+        val scoped_apps_count: Int = 0,
+        val active_generation: String = "",
+    )
+
+    fun getHmaStatus(): HmaStatus? {
+        val out = runCmd(getRootShell(), "${getKsuDaemonPath()} hma status").trim()
+        if (out.isEmpty() || !out.startsWith("{")) return null
+        return try {
+            val json = org.json.JSONObject(out)
+            HmaStatus(
+                enabled = json.optBoolean("enabled", false),
+                installed = json.optBoolean("installed", false),
+                version = json.optString("version", "177-UID3.1"),
+                uid_filter_active = json.optBoolean("uid_filter_active", false),
+                uid_scope_ready = json.optBoolean("uid_scope_ready", false),
+                scoped_apps_count = json.optInt("scoped_apps_count", 0),
+                active_generation = json.optString("active_generation", ""),
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse HMA status", e)
+            null
+        }
+    }
+
+    fun setHmaEnabled(enabled: Boolean): Boolean {
+        val cmd = if (enabled) "hma on" else "hma off"
+        return execKsud(cmd, true)
+    }
+
+    fun syncHmaUidRules(): Boolean = execKsud("hma sync", true)
 }

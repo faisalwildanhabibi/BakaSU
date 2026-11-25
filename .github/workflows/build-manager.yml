@@ -9,7 +9,10 @@ on:
       - '.github/workflows/ddk-lkm.yml'
       - '.github/workflows/ksud.yml'
       - '.github/workflows/ksuinit.yml'
+      - '.github/workflows/builtzygisk.yml'
+      - '.github/workflows/hma.yml'
       - '.github/riscv64-cargo.toml'
+      - 'external/HMA-OSS-UID/**'
       - 'manager/**'
       - 'kernel/**'
       - 'userspace/**'
@@ -87,8 +90,11 @@ jobs:
   build-builtzygisk:
     uses: ./.github/workflows/builtzygisk.yml
 
+  build-hma:
+    uses: ./.github/workflows/hma.yml
+
   build-ksud:
-    needs: [build-lkm, build-ksuinit, build-builtzygisk]
+    needs: [build-lkm, build-ksuinit, build-builtzygisk, build-hma]
     strategy:
       matrix:
         target:

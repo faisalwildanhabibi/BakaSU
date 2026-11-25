@@ -1,0 +1,83 @@
+name: Build HMA-OSS-UID
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      os:
+        required: false
+        type: string
+        default: ubuntu-latest
+
+jobs:
+  build:
+    name: Build HMA-OSS-UID Payload
+    runs-on: ${{ inputs.os || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+          add-to-path: true
+
+      - name: Initialize HMA-OSS-UID Submodules
+        working-directory: external/HMA-OSS-UID
+        run: |
+          git submodule sync
+          git submodule update --init --recursive
+
+      - name: Build HMA Native UID Seccomp Filter
+        working-directory: external/HMA-OSS-UID
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          python3 build_uid_native.py
+
+      - name: Build HMA Zygote Dex
+        working-directory: external/HMA-OSS-UID
+        run: |
+          chmod +x gradlew
+          ./gradlew :zygote:assembleRelease \
+            -Porg.gradle.parallel=true \
+            -Dorg.gradle.jvmargs="-Xmx3072m -XX:+UseG1GC"
+
+      - name: Package Payload
+        working-directory: external/HMA-OSS-UID
+        run: |
+          mkdir -p payload_output/zygisk
+          cp uid-native/build/arm64-v8a.so payload_output/zygisk/arm64-v8a.so
+          
+          # Extract classes.dex from zygote release APK
+          apk="$(find zygote/build/outputs/apk/release -name '*.apk' | head -n 1)"
+          unzip -p "$apk" classes.dex > payload_output/classes.dex
+          
+          cat << 'EOF' > payload_output/module.prop
+          id=hma_oss_zygisk
+          name=HMA-OSS Zygisk + UID
+          version=177-UID3.1
+          versionCode=7304667
+          minSdkVersion=29
+          author=frknkrc44; local scoped UID integration
+          description=System service loaded by HMA; optional scoped ARM64 UID filtering
+          entrypoint=org.frknkrc44.hma_oss.zygote.ZygoteEntry
+          attachNativeLibs=false
+          EOF
+
+      - name: Upload HMA Payload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: hma-payload
+          path: external/HMA-OSS-UID/payload_output/
