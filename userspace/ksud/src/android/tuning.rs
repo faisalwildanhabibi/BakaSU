@@ -1236,16 +1236,8 @@ pub fn apply_persisted() {
         }
     }
 
-    if let Some(v) = config.get("charge_current_ua") {
-        if let Ok(ua) = v.parse::<u64>() {
-            let _ = set_charge_current(ua);
-        }
-    }
-
-    if let Some(v) = config.get("charge_current_ua") {
-        if let Ok(ua) = v.parse::<u64>() {
-            let _ = set_charge_current(ua);
-        }
+    if let Some(Ok(ua)) = config.get("charge_current_ua").map(|v| v.parse::<u64>()) {
+        let _ = set_charge_current(ua);
     }
 
     if let Some(saved) = config
@@ -1334,10 +1326,8 @@ pub fn apply_persisted() {
         let _ = fs::write(MGLRU_MIN_TTL, v);
     }
 
-    if let Some(v) = config.get("zram_size_gb") {
-        if let Ok(gb) = v.parse::<u64>() {
-            let _ = set_zram_size(gb);
-        }
+    if let Some(Ok(gb)) = config.get("zram_size_gb").map(|v| v.parse::<u64>()) {
+        let _ = set_zram_size(gb);
     }
     if let Some(v) = config.get("zram_algorithm") {
         let _ = set_zram_algorithm(v);

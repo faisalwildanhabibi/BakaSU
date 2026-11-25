@@ -729,8 +729,7 @@ class KsuCliRepository(context: Context) {
         if (out.isNotEmpty()) JSONObject(out).optInt("module_count", 0) else 0
     }.getOrDefault(0)
 
-    fun setBuiltinZygiskEnabled(enable: Boolean): Boolean =
-        execKsud(if (enable) "zygisk on" else "zygisk off")
+    fun setBuiltinZygiskEnabled(enable: Boolean): Boolean = execKsud(if (enable) "zygisk on" else "zygisk off")
 
     fun rearmZygisk(): Boolean = execKsud("zygisk rearm")
 
@@ -743,13 +742,11 @@ class KsuCliRepository(context: Context) {
 
     fun setKTuneThermal(index: Int): Boolean = execKsud("tuning thermal $index")
 
-    fun setKTuneBypass(enabled: Boolean): Boolean =
-        execKsud("tuning bypass ${if (enabled) 1 else 0}")
+    fun setKTuneBypass(enabled: Boolean): Boolean = execKsud("tuning bypass ${if (enabled) 1 else 0}")
 
     fun setKTuneChargeLimit(percent: Int): Boolean = execKsud("tuning charge-limit $percent")
 
-    fun setKTuneChargeLimitToggle(enabled: Boolean): Boolean =
-        execKsud("tuning charge-limit-toggle ${if (enabled) 1 else 0}")
+    fun setKTuneChargeLimitToggle(enabled: Boolean): Boolean = execKsud("tuning charge-limit-toggle ${if (enabled) 1 else 0}")
 
     fun setKTuneSwappiness(value: Int): Boolean = execKsud("tuning swappiness $value")
 
