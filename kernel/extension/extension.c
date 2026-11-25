@@ -39,8 +39,8 @@ int ksu_register_extension_handler(const struct ksu_extension_handler *handler)
 
     mutex_lock(&extension_mutex);
     extension_handlers[handler->extension_id] = handler;
-    pr_info("extension: registered handler for %s (id=%u, caps=0x%x)\n",
-            handler->name ? handler->name : "unknown", handler->extension_id, handler->caps);
+    pr_info("extension: registered handler for %s (id=%u, caps=0x%x)\n", handler->name ? handler->name : "unknown",
+            handler->extension_id, handler->caps);
     mutex_unlock(&extension_mutex);
     return 0;
 }
