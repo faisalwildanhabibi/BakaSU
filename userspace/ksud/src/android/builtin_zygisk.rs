@@ -203,12 +203,11 @@ fn sync_all_configured_nomount_uids() {
     if let Ok(entries) = fs::read_dir(profile_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if let Ok(uid) = name.parse::<i32>() {
-                        let _ = sync_nomount_uid(uid);
-                    }
-                }
+            if path.is_file()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && let Ok(uid) = name.parse::<i32>()
+            {
+                let _ = sync_nomount_uid(uid);
             }
         }
     }
