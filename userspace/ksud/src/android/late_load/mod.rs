@@ -121,10 +121,10 @@ pub fn run(package_name: &String, kmi: Option<String>, allow_shell: bool) -> Res
     }
 
     // 7.1 Bootstrap built-in Zygisk if enabled
-    if crate::android::builtin_zygisk::is_enabled() {
-        if let Err(e) = crate::android::builtin_zygisk::bootstrap() {
-            warn!("bootstrap builtin zygisk failed: {e}");
-        }
+    if crate::android::builtin_zygisk::is_enabled()
+        && let Err(e) = crate::android::builtin_zygisk::bootstrap()
+    {
+        warn!("bootstrap builtin zygisk failed: {e}");
     }
 
     // 8. Execute late-load stage scripts with a shared boot deadline

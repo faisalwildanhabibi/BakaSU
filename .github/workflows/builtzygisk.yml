@@ -34,9 +34,11 @@ jobs:
           add-to-path: true
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          components: rust-src
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
