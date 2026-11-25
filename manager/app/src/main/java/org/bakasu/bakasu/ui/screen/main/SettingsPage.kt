@@ -49,6 +49,7 @@ import androidx.compose.material.icons.twotone.Share
 import androidx.compose.material.icons.twotone.Tune
 import androidx.compose.material.icons.twotone.Update
 import androidx.compose.material.icons.twotone.VerifiedUser
+import androidx.compose.material.icons.twotone.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -206,6 +207,17 @@ fun SettingsPage(bottomPadding: Dp) {
                                     description = stringResource(R.string.settings_zygisk_summary),
                                     onClick = {
                                         navigator.push(Route.ZygiskSettings)
+                                    },
+                                )
+                            }
+
+                            item {
+                                SettingsJumpPageWidget(
+                                    icon = Icons.TwoTone.VisibilityOff,
+                                    title = stringResource(R.string.settings_hma_title),
+                                    description = stringResource(R.string.settings_hma_summary),
+                                    onClick = {
+                                        navigator.push(Route.HMASettings)
                                     },
                                 )
                             }

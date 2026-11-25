@@ -1,3 +1,6 @@
 [submodule "external/BuiltZygisk"]
 	path = external/BuiltZygisk
 	url = https://github.com/SukiSU-Nova/BuiltZygisk.git
+[submodule "external/HMA-OSS-UID"]
+	path = external/HMA-OSS-UID
+	url = https://github.com/Moderate-Qi/HMA-OSS-UID.git

@@ -727,4 +727,24 @@
     <string name="zygisk_nomount_isolation_summary">Automatically block isolated process UIDs from accessing root modules</string>
     <string name="zygisk_rearm_action">Rearm / Reload Zygisk</string>
     <string name="zygisk_rearm_summary">Re-inject running zygotes and refresh loaded modules</string>
+
+    <!-- HMA OSS & UID Isolation -->
+    <string name="settings_hma_title">HMA &amp; UID Isolation</string>
+    <string name="settings_hma_summary">Native applist hiding and seccomp UID isolation</string>
+    <string name="hma_enable_title">Enable HMA &amp; UID Isolation</string>
+    <string name="hma_enable_summary">Activate built-in Zygisk module and seccomp notification filter</string>
+    <string name="hma_status_card_title">Engine &amp; Filter Telemetry</string>
+    <string name="hma_engine_status">HMA Engine</string>
+    <string name="hma_uid_filter_status">UID Seccomp Filter</string>
+    <string name="hma_scoped_apps_count">Protected Applications</string>
+    <string name="hma_root_hidden_count">Hidden Root &amp; Preset Apps</string>
+    <string name="hma_active_generation">Active Generation</string>
+    <string name="hma_sync_action">Sync UID Rules</string>
+    <string name="hma_sync_summary">Regenerate and synchronize UID rules for active boot session</string>
+    <string name="hma_preset_title">Root-Grant Auto Hiding</string>
+    <string name="hma_preset_summary">Automatically hide all root-granted applications from non-root user applications</string>
+    <string name="hma_status_ready">READY</string>
+    <string name="hma_status_active">Active</string>
+    <string name="hma_status_disabled">Disabled</string>
+    <string name="home_hma_info">HMA &amp; UID Guard</string>
 </resources>

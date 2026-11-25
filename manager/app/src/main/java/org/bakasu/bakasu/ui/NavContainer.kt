@@ -91,6 +91,7 @@ import org.bakasu.bakasu.ui.screen.TemplateEditorScreen
 import org.bakasu.bakasu.ui.screen.UmountManagerScreen
 import org.bakasu.bakasu.ui.screen.about.AboutScreen
 import org.bakasu.bakasu.ui.screen.about.OpenSourceLicenseScreen
+import org.bakasu.bakasu.ui.screen.hma.HMAScreen
 import org.bakasu.bakasu.ui.screen.kernelFlash.KernelFlashScreen
 import org.bakasu.bakasu.ui.screen.ktune.KTuneScreen
 import org.bakasu.bakasu.ui.screen.main.MainScreen
@@ -623,6 +624,17 @@ fun NavContainer(
                     useBlur = useBlur,
                 ) {
                     ZygiskScreen()
+                }
+            }
+            entry<Route.HMASettings>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    HMAScreen()
                 }
             }
             entry<Route.KernelFlash>(swipeDismiss = NavSwipeDirection.None) { key ->

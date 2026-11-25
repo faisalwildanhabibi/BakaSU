@@ -52,6 +52,7 @@ import androidx.compose.material.icons.twotone.Tag
 import androidx.compose.material.icons.twotone.TaskAlt
 import androidx.compose.material.icons.twotone.Terminal
 import androidx.compose.material.icons.twotone.Tune
+import androidx.compose.material.icons.twotone.VisibilityOff
 import androidx.compose.material.icons.twotone.VolunteerActivism
 import androidx.compose.material.icons.twotone.Warning
 import androidx.compose.material3.Button
@@ -858,6 +859,26 @@ private fun InfoCard(
                 iconPlaceholder = false,
                 title = stringResource(R.string.home_zygisk_modules),
                 description = "${systemInfo.zygiskModulesCount} active modules loaded",
+            )
+        }
+
+        item {
+            SettingsBaseWidget(
+                icon = Icons.TwoTone.VisibilityOff.takeIf { showHomeCardIcons },
+                iconPlaceholder = false,
+                title = stringResource(R.string.home_hma_info),
+                description = if (systemInfo.hmaActive) {
+                    "Built-in HMA OSS + UID Seccomp"
+                } else {
+                    stringResource(R.string.hma_status_disabled)
+                },
+                foreContent = {
+                    Spacer(Modifier.width(8.dp))
+                    LabelText(
+                        label = if (systemInfo.hmaActive) stringResource(R.string.hma_status_ready) else stringResource(R.string.hma_status_disabled),
+                        containerColor = if (systemInfo.hmaActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                    )
+                },
             )
         }
     }

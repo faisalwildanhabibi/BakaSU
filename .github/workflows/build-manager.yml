@@ -104,8 +104,11 @@ jobs:
   build-builtzygisk:
     uses: ./.github/workflows/builtzygisk.yml
 
+  build-hma:
+    uses: ./.github/workflows/hma.yml
+
   build-ksud:
-    needs: [build-ksuinit, build-builtzygisk]
+    needs: [build-ksuinit, build-builtzygisk, build-hma]
     strategy:
       fail-fast: false
       matrix:
@@ -323,6 +326,7 @@ jobs:
             builtzygisk-arm
             builtzygisk-x86_64
             builtzygisk-riscv64
+            hma-payload
             Manager-mappings
           failOnError: false
 
