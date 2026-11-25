@@ -99,7 +99,6 @@ jobs:
     with:
       target: ${{ matrix.target }}
       os: ${{ matrix.os }}
-      pack_builtzygisk: false
 
   build-manager:
     needs: [prepare]
