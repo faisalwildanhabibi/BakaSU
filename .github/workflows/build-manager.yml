@@ -84,8 +84,11 @@ jobs:
   build-ksuinit:
     uses: ./.github/workflows/ksuinit.yml
 
+  build-builtzygisk:
+    uses: ./.github/workflows/builtzygisk.yml
+
   build-ksud:
-    needs: [build-lkm, build-ksuinit]
+    needs: [build-lkm, build-ksuinit, build-builtzygisk]
     strategy:
       matrix:
         target:
@@ -98,6 +101,7 @@ jobs:
     with:
       target: ${{ matrix.target }}
       os: ${{ matrix.os }}
+      pack_builtzygisk: true
 
   build-manager:
     needs: [prepare]
