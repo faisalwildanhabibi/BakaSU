@@ -1154,8 +1154,7 @@ static int do_extension(void __user *arg)
         return -EINVAL;
 
     if (cmd.op == KSU_EXTENSION_IO)
-        return ksu_extension_ioctl(extension_id, cmd.api_version,
-                                   (void __user *)(uintptr_t)cmd.user_ptr);
+        return ksu_extension_ioctl(extension_id, cmd.api_version, (void __user *)(uintptr_t)cmd.user_ptr);
 
     if (cmd.op == KSU_EXTENSION_WIPE)
         return ksu_extension_wipe(extension_id, cmd.api_version);
@@ -1168,8 +1167,7 @@ static int do_extension(void __user *arg)
             u64 value = 0;
             u32 caps = 0;
 
-            (void)ksu_extension_get(extension_id, KSU_EXTENSION_API_VERSION,
-                                    &value, &caps);
+            (void)ksu_extension_get(extension_id, KSU_EXTENSION_API_VERSION, &value, &caps);
             cmd.supported = caps;
             cmd.value = value;
             cmd.api_version = KSU_EXTENSION_API_VERSION;

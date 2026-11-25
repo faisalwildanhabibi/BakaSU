@@ -156,7 +156,8 @@ static void persistent_adb_restart_work_fn(struct work_struct *work)
     int ret_restart = call_usermodehelper(restart_argv[0], restart_argv, envp, UMH_WAIT_EXEC);
 
     if (ret_start != 0 && ret_restart != 0) {
-        pr_warn("persistent_adb: call_usermodehelper ctl.start/restart adbd returned %d / %d\n", ret_start, ret_restart);
+        pr_warn("persistent_adb: call_usermodehelper ctl.start/restart adbd returned %d / %d\n",
+                ret_start, ret_restart);
     } else {
         pr_info("persistent_adb: adbd lifecycle ensured reactively via native kernel event\n");
     }
