@@ -28,8 +28,19 @@ jobs:
       keystore_password: ${{ steps.gen.outputs.keystore_password }}
       key_password: ${{ steps.gen.outputs.key_password }}
     steps:
+      - name: Check Keystore Availability
+        id: check_keystore
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+        run: |
+          if [ -n "$KEYSTORE" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "has_keystore=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_keystore=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Generate temporary keystore
-        if: github.event_name == 'pull_request' || !secrets.KEYSTORE
+        if: steps.check_keystore.outputs.has_keystore == 'false'
         id: gen
         run: |
           KEYSTORE_PASSWORD=$(openssl rand -hex 32)
@@ -50,7 +61,7 @@ jobs:
           echo "keystore=$(base64 -w 0 pr-key.jks)" >> $GITHUB_OUTPUT
 
       - name: Extract certificate hash and size
-        if: github.event_name == 'pull_request' || !secrets.KEYSTORE
+        if: steps.check_keystore.outputs.has_keystore == 'false'
         id: extract
         env:
           STORE_PASS: ${{ steps.gen.outputs.keystore_password }}
