@@ -11,7 +11,7 @@ class BaselineProfileGenerator {
 
     @Test
     fun startup() = baselineProfileRule.collect(
-        packageName = "com.resukisu.resukisu",
+        packageName = "org.bakasu.bakasu",
         includeInStartupProfile = true,
     ) {
         pressHome()
@@ -20,7 +20,7 @@ class BaselineProfileGenerator {
 
     @Test
     fun homePagerUserScroll() = baselineProfileRule.collect(
-        packageName = "com.resukisu.resukisu",
+        packageName = "org.bakasu.bakasu",
         includeInStartupProfile = false,
     ) {
         pressHome()
