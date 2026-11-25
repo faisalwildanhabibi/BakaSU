@@ -49,7 +49,7 @@ perform_cleanup() {
 setup_kernelsu() {
 	echo "[+] Setting up KernelSU..."
 	KSU_REPO="${KSU_REPO:-https://github.com/faisalwildanhabibi/BakaSU}"
-	KSU_BRANCH="${1:-main}"
+	KSU_BRANCH="${1:-custom/main}"
 
 	if [ ! -d "$GKI_ROOT/KernelSU" ]; then
 		git clone "$KSU_REPO" -b "$KSU_BRANCH" --depth=1 "$GKI_ROOT/KernelSU" && echo "[+] Repository cloned from $KSU_REPO ($KSU_BRANCH)."
@@ -95,7 +95,7 @@ setup_submodule() {
 	fi
 
     echo '[+] Setting up KernelSU as submodule...'
-    git submodule add https://github.com/Baka-SU/BakaSU KernelSU || echo '[!] Failed to add KernelSU as a submodule.'
+    git submodule add -b "${KSU_BRANCH:-custom/main}" "${KSU_REPO:-https://github.com/faisalwildanhabibi/BakaSU}" KernelSU || echo '[!] Failed to add KernelSU as a submodule.'
     echo '[+] Done.'
 }
 
