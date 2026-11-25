@@ -1231,10 +1231,11 @@ pub fn run() -> Result<()> {
                 let daemon_running = crate::android::builtin_zygisk::is_daemon_active();
                 let zygote_injected = crate::android::builtin_zygisk::is_zygote_injected();
                 let fully_active = crate::android::builtin_zygisk::is_fully_active();
-                let zygotes: Vec<serde_json::Value> = crate::android::builtin_zygisk::zygote_states()
-                    .into_iter()
-                    .map(|(abi, status)| serde_json::json!({ "abi": abi, "status": status }))
-                    .collect();
+                let zygotes: Vec<serde_json::Value> =
+                    crate::android::builtin_zygisk::zygote_states()
+                        .into_iter()
+                        .map(|(abi, status)| serde_json::json!({ "abi": abi, "status": status }))
+                        .collect();
                 let monitor = crate::android::builtin_zygisk::monitor_process();
                 let daemons = crate::android::builtin_zygisk::daemon_processes();
                 let (version, version_code) = crate::android::builtin_zygisk::version()
@@ -1314,9 +1315,10 @@ pub fn run() -> Result<()> {
                 Ok(())
             }
             ZygiskCommand::Modules => {
-                let modules: Vec<serde_json::Value> = crate::android::builtin_zygisk::injected_modules()
-                    .into_iter()
-                    .map(|module| {
+                let modules: Vec<serde_json::Value> =
+                    crate::android::builtin_zygisk::injected_modules()
+                        .into_iter()
+                        .map(|module| {
                         let processes: Vec<serde_json::Value> = module
                             .processes
                             .into_iter()
