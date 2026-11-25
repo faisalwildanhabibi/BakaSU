@@ -498,7 +498,7 @@ pub fn print_status() {
         .unwrap_or_default()
         .trim()
         .to_string();
-    
+
     // Comma-separated so Kotlin can split it easily
     println!("tcp_available={}", tcp_avail.trim().replace(' ', ","));
     println!("tcp_current={tcp_cur}");

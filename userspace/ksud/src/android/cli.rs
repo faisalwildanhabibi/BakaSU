@@ -1319,30 +1319,30 @@ pub fn run() -> Result<()> {
                     crate::android::builtin_zygisk::injected_modules()
                         .into_iter()
                         .map(|module| {
-                        let processes: Vec<serde_json::Value> = module
-                            .processes
-                            .into_iter()
-                            .map(|(name, pid, kind)| {
-                                serde_json::json!({
-                                    "name": name,
-                                    "pid": pid,
-                                    "kind": kind,
+                            let processes: Vec<serde_json::Value> = module
+                                .processes
+                                .into_iter()
+                                .map(|(name, pid, kind)| {
+                                    serde_json::json!({
+                                        "name": name,
+                                        "pid": pid,
+                                        "kind": kind,
+                                    })
                                 })
+                                .collect();
+                            serde_json::json!({
+                                "id": module.id,
+                                "name": module.name,
+                                "version": module.version,
+                                "type": module.kind,
+                                "abi": module.abi,
+                                "targets": module.targets,
+                                "companion": module.companion,
+                                "state": module.state,
+                                "processes": processes,
                             })
-                            .collect();
-                        serde_json::json!({
-                            "id": module.id,
-                            "name": module.name,
-                            "version": module.version,
-                            "type": module.kind,
-                            "abi": module.abi,
-                            "targets": module.targets,
-                            "companion": module.companion,
-                            "state": module.state,
-                            "processes": processes,
                         })
-                    })
-                    .collect();
+                        .collect();
                 println!("{}", serde_json::json!({ "modules": modules }));
                 Ok(())
             }
