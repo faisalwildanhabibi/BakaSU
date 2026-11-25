@@ -322,7 +322,10 @@ fn update_config(key: &str, value: &str) -> Result<()> {
 }
 
 fn thermal_node(config: &HashMap<String, String>) -> Option<PathBuf> {
-    find_node(THERMAL_NODES, config.get("thermal_node").map(String::as_str))
+    find_node(
+        THERMAL_NODES,
+        config.get("thermal_node").map(String::as_str),
+    )
 }
 
 fn bypass_node(config: &HashMap<String, String>) -> Option<PathBuf> {
@@ -464,7 +467,10 @@ pub fn print_status() {
 
     println!("sched_supported={}", i32::from(skip.is_some()));
     println!("sched_skip_headroom={}", skip.unwrap_or(1));
-    println!("sched_pelt_multiplier_supported={}", i32::from(pelt.is_some()));
+    println!(
+        "sched_pelt_multiplier_supported={}",
+        i32::from(pelt.is_some())
+    );
     println!("sched_pelt_multiplier={}", pelt.unwrap_or(0));
     println!("sched_hr_scaling={}", hr.unwrap_or(0));
     println!("sched_boost_hr_lp={}", lp.unwrap_or(0));
@@ -484,8 +490,14 @@ pub fn print_status() {
 
     // --- Networking ---
     let tcp_avail = fs::read_to_string(TCP_AVAILABLE).unwrap_or_default();
-    let tcp_cur = fs::read_to_string(TCP_CURRENT).unwrap_or_default().trim().to_string();
-    let qdisc_cur = fs::read_to_string(QDISC_CURRENT).unwrap_or_default().trim().to_string();
+    let tcp_cur = fs::read_to_string(TCP_CURRENT)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let qdisc_cur = fs::read_to_string(QDISC_CURRENT)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     
     // Comma-separated so Kotlin can split it easily
     println!("tcp_available={}", tcp_avail.trim().replace(' ', ","));
@@ -500,7 +512,10 @@ pub fn print_status() {
     let vfs_cache = read_i32_str(VFS_CACHE_PRESSURE).unwrap_or(100);
     let kcompressd = read_i32_str(KCOMPRESSD).unwrap_or(24);
 
-    let mglru_raw = fs::read_to_string(MGLRU_ENABLED).unwrap_or_default().trim().to_string();
+    let mglru_raw = fs::read_to_string(MGLRU_ENABLED)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let mglru_enabled = mglru_raw != "0x0000" && !mglru_raw.is_empty();
     let mglru_ttl = read_i32_str(MGLRU_MIN_TTL).unwrap_or(1000);
 
@@ -518,8 +533,7 @@ pub fn print_status() {
         .ok()
         .and_then(|s| s.trim().parse::<u64>().ok())
         .unwrap_or(0);
-    let comp_raw = fs::read_to_string(format!("{ZRAM_SYSFS}/comp_algorithm"))
-        .unwrap_or_default();
+    let comp_raw = fs::read_to_string(format!("{ZRAM_SYSFS}/comp_algorithm")).unwrap_or_default();
     // The active algorithm is wrapped in [brackets], e.g. "lzo [lz4] zstd"
     let comp_current = comp_raw
         .split_whitespace()
@@ -986,7 +1000,7 @@ pub fn set_cgroup_value(name: &str, key: &str, value: i32) -> Result<()> {
     let (file, clamped) = match key {
         "uclamp_min" => ("cpu.uclamp.min", value.clamp(0, 100)),
         "uclamp_max" => ("cpu.uclamp.max", value.clamp(0, 100)),
-        "shares"      => ("cpu.shares",      value.clamp(1024, 20480)),
+        "shares" => ("cpu.shares", value.clamp(1024, 20480)),
         _ => bail!("unknown cgroup key {key}"),
     };
     let path = cgroup_path(name, file);
@@ -1032,7 +1046,8 @@ pub fn set_swappiness(value: i32) -> Result<()> {
 
 pub fn set_vfs_cache_pressure(value: i32) -> Result<()> {
     let v = value.clamp(0, 1000);
-    fs::write(VFS_CACHE_PRESSURE, v.to_string()).with_context(|| "failed to write vfs_cache_pressure")?;
+    fs::write(VFS_CACHE_PRESSURE, v.to_string())
+        .with_context(|| "failed to write vfs_cache_pressure")?;
     update_config("vm_vfs_cache", &v.to_string())?;
     println!("ok");
     Ok(())
@@ -1057,7 +1072,8 @@ pub fn set_mglru(enabled: bool) -> Result<()> {
 
 pub fn set_mglru_ttl(value: i32) -> Result<()> {
     let v = value.clamp(0, 10000);
-    fs::write(MGLRU_MIN_TTL, v.to_string()).with_context(|| "failed to write lru_gen/min_ttl_ms")?;
+    fs::write(MGLRU_MIN_TTL, v.to_string())
+        .with_context(|| "failed to write lru_gen/min_ttl_ms")?;
     update_config("vm_mglru_ttl", &v.to_string())?;
     println!("ok");
     Ok(())
@@ -1124,8 +1140,7 @@ pub fn set_zram_algorithm(algorithm: &str) -> Result<()> {
         bail!("zram device not found");
     }
     // Validate: must be in the available list
-    let available = fs::read_to_string(format!("{ZRAM_SYSFS}/comp_algorithm"))
-        .unwrap_or_default();
+    let available = fs::read_to_string(format!("{ZRAM_SYSFS}/comp_algorithm")).unwrap_or_default();
     let ok = available
         .split_whitespace()
         .any(|s| s.trim_matches(|c| c == '[' || c == ']') == algorithm);
@@ -1178,11 +1193,8 @@ pub fn apply_persisted() {
         return;
     }
 
-    // If persistence is disabled, do nothing â€” kernel defaults apply.
-    let persist = config
-        .get("persist")
-        .map(|v| v != "0")
-        .unwrap_or(true);
+    // If persistence is disabled, do nothing — kernel defaults apply.
+    let persist = config.get("persist").map(|v| v != "0").unwrap_or(true);
     if !persist {
         info!("ktune persistence disabled, using kernel defaults");
         return;
