@@ -403,7 +403,10 @@ pub enum HmaTemplateCommand {
 #[derive(clap::Subcommand, Debug)]
 pub enum HmaScopeCommand {
     /// Set or update an app's scope config as JSON
-    Set { package: String, config_json: String },
+    Set {
+        package: String,
+        config_json: String,
+    },
     /// Remove an app from scope and add to ignoredPackagesForPresets
     Remove { package: String },
 }

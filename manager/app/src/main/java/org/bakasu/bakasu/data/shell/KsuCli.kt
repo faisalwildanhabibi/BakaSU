@@ -966,8 +966,7 @@ class KsuCliRepository(context: Context) {
         }
     }
 
-    fun setHmaConfigOption(key: String, value: Boolean): Boolean =
-        execKsud("hma config set ${shellQuote(key)} $value", true)
+    fun setHmaConfigOption(key: String, value: Boolean): Boolean = execKsud("hma config set ${shellQuote(key)} $value", true)
 
     fun setHmaTemplate(name: String, isWhitelist: Boolean, apps: List<String>): Boolean {
         val wlFlag = if (isWhitelist) "--whitelist " else ""
@@ -975,8 +974,7 @@ class KsuCliRepository(context: Context) {
         return execKsud("hma template set $wlFlag${shellQuote(name)} ${shellQuote(appsCsv)}", true)
     }
 
-    fun deleteHmaTemplate(name: String): Boolean =
-        execKsud("hma template delete ${shellQuote(name)}", true)
+    fun deleteHmaTemplate(name: String): Boolean = execKsud("hma template delete ${shellQuote(name)}", true)
 
     fun setHmaAppScope(appScope: HmaAppScope): Boolean {
         val json = org.json.JSONObject().apply {
@@ -992,6 +990,5 @@ class KsuCliRepository(context: Context) {
         return execKsud("hma scope set ${shellQuote(appScope.packageName)} ${shellQuote(json.toString())}", true)
     }
 
-    fun removeHmaAppScope(packageName: String): Boolean =
-        execKsud("hma scope remove ${shellQuote(packageName)}", true)
+    fun removeHmaAppScope(packageName: String): Boolean = execKsud("hma scope remove ${shellQuote(packageName)}", true)
 }
