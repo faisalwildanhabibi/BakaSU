@@ -686,4 +686,45 @@
     <string name="susfs_sus_path_uid_filter_description">Select apps that can see paths hidden by SUSFS. Other ordinary apps cannot see these paths. Only app UIDs 10000–19999 can be selected. Changes take effect immediately and are restored after reboot. Apps sharing a UID are affected together.</string>
     <string name="susfs_uid_filter_search">Search apps</string>
     <string name="susfs_uid_filter_loading">Loading apps…</string>
+
+    <!-- NoroiSU & SukiSU Nova Fusion UI -->
+    <string name="home_quick_actions">Quick Actions</string>
+    <string name="quick_action_reboot">Reboot</string>
+    <string name="quick_action_soft_reboot">Soft Reboot</string>
+    <string name="quick_action_recovery">Recovery</string>
+    <string name="quick_action_bootloader">Bootloader</string>
+    <string name="quick_action_flash">Flash</string>
+
+    <string name="home_hardware_info">Hardware &amp; System Specs</string>
+    <string name="home_soc_model">Processor / SoC</string>
+    <string name="home_cpu_cores">CPU Cores</string>
+    <string name="home_ram_usage">RAM Usage</string>
+    <string name="home_battery_info">Battery Telemetry</string>
+    <string name="home_security_patch">Security Patch</string>
+
+    <string name="home_zygisk_info">Zygisk Implementation</string>
+    <string name="home_zygisk_engine">Zygisk Engine</string>
+    <string name="home_zygisk_status">Zygisk Status</string>
+    <string name="home_zygisk_modules">Loaded Zygisk Modules</string>
+    <string name="zygisk_status_running">Active &amp; Injected</string>
+    <string name="zygisk_status_disabled">Disabled</string>
+
+    <string name="settings_ktune_title">KTune Performance &amp; Tuning</string>
+    <string name="settings_ktune_summary">CPU governor, thermal profiles, charging bypass, and memory optimization</string>
+    <string name="ktune_thermal_profile">Thermal Profile</string>
+    <string name="ktune_bypass_charging">Bypass Charging</string>
+    <string name="ktune_bypass_charging_summary">Power device directly without charging battery to reduce heat during gaming</string>
+    <string name="ktune_charge_limit">Charge Limit</string>
+    <string name="ktune_charge_limit_summary">Limit battery charging to protect battery lifespan</string>
+    <string name="ktune_memory_swappiness">Swappiness</string>
+    <string name="ktune_memory_swappiness_summary">Adjust kernel swapping aggressiveness</string>
+
+    <string name="settings_zygisk_title">Built-in Zygisk</string>
+    <string name="settings_zygisk_summary">Zygote injection, module management, and NoMount isolation guard</string>
+    <string name="zygisk_enable_title">Enable Built-in Zygisk</string>
+    <string name="zygisk_enable_summary">Inject into Zygote process to load Zygisk modules without external loader</string>
+    <string name="zygisk_nomount_isolation">NoMount Isolated UID Guard</string>
+    <string name="zygisk_nomount_isolation_summary">Automatically block isolated process UIDs from accessing root modules</string>
+    <string name="zygisk_rearm_action">Rearm / Reload Zygisk</string>
+    <string name="zygisk_rearm_summary">Re-inject running zygotes and refresh loaded modules</string>
 </resources>

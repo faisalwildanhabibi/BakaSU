@@ -46,6 +46,7 @@ import androidx.compose.material.icons.twotone.Science
 import androidx.compose.material.icons.twotone.Security
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
+import androidx.compose.material.icons.twotone.Tune
 import androidx.compose.material.icons.twotone.Update
 import androidx.compose.material.icons.twotone.VerifiedUser
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -181,6 +182,38 @@ fun SettingsPage(bottomPadding: Dp) {
                 bottom = innerPadding.calculateBottomPadding() + bottomPadding + 15.dp,
             ),
         ) {
+            // Tuning & Runtime Extensions (noroiSU & SukiSU Nova)
+            if (homeState.systemStatus.isFullFeatured) {
+                item {
+                    SegmentedColumn(
+                        title = "Performance & System Extensions",
+                        content = {
+                            item {
+                                SettingsJumpPageWidget(
+                                    icon = Icons.TwoTone.Tune,
+                                    title = stringResource(R.string.settings_ktune_title),
+                                    description = stringResource(R.string.settings_ktune_summary),
+                                    onClick = {
+                                        navigator.push(Route.KTuneSettings)
+                                    },
+                                )
+                            }
+
+                            item {
+                                SettingsJumpPageWidget(
+                                    icon = Icons.TwoTone.Extension,
+                                    title = stringResource(R.string.settings_zygisk_title),
+                                    description = stringResource(R.string.settings_zygisk_summary),
+                                    onClick = {
+                                        navigator.push(Route.ZygiskSettings)
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
+            }
+
             // 配置卡片
             if (homeState.systemStatus.isFullFeatured) {
                 item {

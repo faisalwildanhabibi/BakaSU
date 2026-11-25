@@ -705,9 +705,53 @@ class KsuCliRepository(context: Context) {
             return name
         }
 
+        // Check Built-in Zygisk
+        if (SuFile.open("/data/adb/ksu/bin/zygisk-ptrace").isFile || isBuiltinZygiskActive()) {
+            return "Built-in Zygisk"
+        }
+
         Log.i(TAG, "Zygisk implement: None")
         return "None"
     }
+
+    fun getZygiskStatusJson(): String = runCatching {
+        val shell = getRootShell()
+        ShellUtils.fastCmd(shell, "${getKsuDaemonPath()} zygisk status")
+    }.getOrDefault("")
+
+    fun isBuiltinZygiskActive(): Boolean {
+        val out = getZygiskStatusJson()
+        return out.contains("\"running\": true") || out.contains("\"running\":true") || SuFile.open("/dev/socket/zygiskd").exists()
+    }
+
+    fun getBuiltinZygiskModulesCount(): Int = runCatching {
+        val out = getZygiskStatusJson()
+        if (out.isNotEmpty()) JSONObject(out).optInt("module_count", 0) else 0
+    }.getOrDefault(0)
+
+    fun setBuiltinZygiskEnabled(enable: Boolean): Boolean =
+        execKsud(if (enable) "zygisk on" else "zygisk off")
+
+    fun rearmZygisk(): Boolean = execKsud("zygisk rearm")
+
+    fun syncZygiskNoMount(): Boolean = execKsud("zygisk nomount-sync")
+
+    fun getKTuneStatusJson(): String = runCatching {
+        val shell = getRootShell()
+        ShellUtils.fastCmd(shell, "${getKsuDaemonPath()} tuning status")
+    }.getOrDefault("")
+
+    fun setKTuneThermal(index: Int): Boolean = execKsud("tuning thermal $index")
+
+    fun setKTuneBypass(enabled: Boolean): Boolean =
+        execKsud("tuning bypass ${if (enabled) 1 else 0}")
+
+    fun setKTuneChargeLimit(percent: Int): Boolean = execKsud("tuning charge-limit $percent")
+
+    fun setKTuneChargeLimitToggle(enabled: Boolean): Boolean =
+        execKsud("tuning charge-limit-toggle ${if (enabled) 1 else 0}")
+
+    fun setKTuneSwappiness(value: Int): Boolean = execKsud("tuning swappiness $value")
 
     fun addKernelUmountPath(path: String, flags: Int): Boolean {
         val shell = getRootShell()

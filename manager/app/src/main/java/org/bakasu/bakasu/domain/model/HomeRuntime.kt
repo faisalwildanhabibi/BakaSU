@@ -9,6 +9,14 @@ data class HomeBasicInfo(
     val managerVersion: Triple<String, Int, Int> = Triple("", 0, 0),
     val selinuxStatus: String = "",
     val seccompStatus: Int = -1,
+    val socModel: String = "",
+    val cpuCores: Int = 0,
+    val totalMemory: String = "",
+    val availMemory: String = "",
+    val batteryLevel: Int = -1,
+    val batteryTemp: Float = 0f,
+    val batteryStatus: String = "",
+    val securityPatch: String = "",
 )
 
 data class HomeModuleOverview(
@@ -34,6 +42,16 @@ data class HomeSystemInfo(
     val zygiskImplement: String = "",
     val metaModuleImplement: String = "",
     val seccompStatus: Int = -1,
+    val socModel: String = "",
+    val cpuCores: Int = 0,
+    val totalMemory: String = "",
+    val availMemory: String = "",
+    val batteryLevel: Int = -1,
+    val batteryTemp: Float = 0f,
+    val batteryStatus: String = "",
+    val securityPatch: String = "",
+    val zygiskRunning: Boolean = false,
+    val zygiskModulesCount: Int = 0,
 )
 
 data class HomeDashboardState(

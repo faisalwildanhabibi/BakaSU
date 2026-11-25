@@ -169,6 +169,14 @@ sealed interface Route :
 
     @Parcelize
     @Serializable
+    data object KTuneSettings : Route
+
+    @Parcelize
+    @Serializable
+    data object ZygiskSettings : Route
+
+    @Parcelize
+    @Serializable
     data class KernelFlash(
         val kernelUri: String,
         val selectedSlot: String?,

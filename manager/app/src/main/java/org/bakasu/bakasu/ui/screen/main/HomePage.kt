@@ -16,6 +16,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.add
@@ -30,7 +31,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.twotone.MenuBook
 import androidx.compose.material.icons.twotone.Android
+import androidx.compose.material.icons.twotone.BatteryChargingFull
 import androidx.compose.material.icons.twotone.Block
+import androidx.compose.material.icons.twotone.Build
 import androidx.compose.material.icons.twotone.DeveloperBoard
 import androidx.compose.material.icons.twotone.Error
 import androidx.compose.material.icons.twotone.Extension
@@ -39,14 +42,21 @@ import androidx.compose.material.icons.twotone.Group
 import androidx.compose.material.icons.twotone.Info
 import androidx.compose.material.icons.twotone.Memory
 import androidx.compose.material.icons.twotone.PowerSettingsNew
+import androidx.compose.material.icons.twotone.Publish
+import androidx.compose.material.icons.twotone.Refresh
+import androidx.compose.material.icons.twotone.RestartAlt
 import androidx.compose.material.icons.twotone.Security
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Smartphone
 import androidx.compose.material.icons.twotone.Tag
 import androidx.compose.material.icons.twotone.TaskAlt
+import androidx.compose.material.icons.twotone.Terminal
 import androidx.compose.material.icons.twotone.Tune
 import androidx.compose.material.icons.twotone.VolunteerActivism
 import androidx.compose.material.icons.twotone.Warning
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
+import java.util.Locale
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuGroup
@@ -346,6 +356,17 @@ fun HomePage(
                         }
                     },
                 )
+
+                if (uiState.systemStatus.isRootAvailable || uiState.systemStatus.ksuVersion != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    QuickActionsCard(
+                        onReboot = { viewModel.dispatch(HomeUiAction.Reboot(it)) },
+                        onClickInstall = {
+                            if (uiState.systemStatus.isLateLoadMode) return@QuickActionsCard
+                            navigator.push(Route.Install(preselectedKernelUri = null))
+                        },
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(10.dp))
             ManagerUpdateCard(uiState.stableManagerUpdate)
@@ -741,8 +762,9 @@ private fun InfoCard(
 ) {
     val managersList = systemInfo.managersList
 
+    // Hardware & System Specifications (ala noroiSU)
     SegmentedColumn(
-        title = stringResource(R.string.home_version_info),
+        title = stringResource(R.string.home_hardware_info),
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
     ) {
@@ -755,6 +777,96 @@ private fun InfoCard(
             )
         }
 
+        item(visible = systemInfo.socModel.isNotBlank()) {
+            SettingsBaseWidget(
+                icon = Icons.TwoTone.DeveloperBoard.takeIf { showHomeCardIcons },
+                iconPlaceholder = false,
+                title = stringResource(R.string.home_soc_model),
+                description = systemInfo.socModel,
+            )
+        }
+
+        item(visible = systemInfo.cpuCores > 0) {
+            SettingsBaseWidget(
+                icon = Icons.TwoTone.Memory.takeIf { showHomeCardIcons },
+                iconPlaceholder = false,
+                title = stringResource(R.string.home_cpu_cores),
+                description = "${systemInfo.cpuCores} Cores (${Os.uname().machine})",
+            )
+        }
+
+        item(visible = systemInfo.totalMemory.isNotBlank() && systemInfo.totalMemory != "Unknown") {
+            SettingsBaseWidget(
+                icon = Icons.TwoTone.Memory.takeIf { showHomeCardIcons },
+                iconPlaceholder = false,
+                title = stringResource(R.string.home_ram_usage),
+                description = "Available: ${systemInfo.availMemory} / Total: ${systemInfo.totalMemory}",
+            )
+        }
+
+        item(visible = systemInfo.batteryLevel >= 0) {
+            SettingsBaseWidget(
+                icon = Icons.TwoTone.BatteryChargingFull.takeIf { showHomeCardIcons },
+                iconPlaceholder = false,
+                title = stringResource(R.string.home_battery_info),
+                description = "${systemInfo.batteryLevel}% • ${String.format(Locale.US, "%.1f°C", systemInfo.batteryTemp)} • ${systemInfo.batteryStatus}",
+            )
+        }
+
+        item(visible = systemInfo.securityPatch.isNotBlank()) {
+            SettingsBaseWidget(
+                icon = Icons.TwoTone.Security.takeIf { showHomeCardIcons },
+                iconPlaceholder = false,
+                title = stringResource(R.string.home_security_patch),
+                description = systemInfo.securityPatch,
+            )
+        }
+    }
+
+    // Zygisk Implementation Info (ala SukiSU Nova)
+    SegmentedColumn(
+        title = stringResource(R.string.home_zygisk_info),
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+    ) {
+        item {
+            val isZygiskRunning = systemInfo.zygiskRunning || (systemInfo.zygiskImplement.isNotEmpty() && systemInfo.zygiskImplement != "None")
+            SettingsBaseWidget(
+                icon = Icons.TwoTone.Extension.takeIf { showHomeCardIcons },
+                iconPlaceholder = false,
+                title = stringResource(R.string.home_zygisk_engine),
+                description = if (systemInfo.zygiskImplement.isNotEmpty() && systemInfo.zygiskImplement != "None") {
+                    systemInfo.zygiskImplement
+                } else if (systemInfo.zygiskRunning) {
+                    "Built-in Zygisk (SukiSU-Nova Engine)"
+                } else {
+                    stringResource(R.string.zygisk_status_disabled)
+                },
+                foreContent = {
+                    Spacer(Modifier.width(8.dp))
+                    LabelText(
+                        label = if (isZygiskRunning) stringResource(R.string.zygisk_status_running) else stringResource(R.string.zygisk_status_disabled),
+                        containerColor = if (isZygiskRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    )
+                },
+            )
+        }
+
+        item(visible = systemInfo.zygiskRunning || systemInfo.zygiskModulesCount > 0) {
+            SettingsBaseWidget(
+                icon = Icons.TwoTone.Extension.takeIf { showHomeCardIcons },
+                iconPlaceholder = false,
+                title = stringResource(R.string.home_zygisk_modules),
+                description = "${systemInfo.zygiskModulesCount} active modules loaded",
+            )
+        }
+    }
+
+    SegmentedColumn(
+        title = stringResource(R.string.home_version_info),
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+    ) {
         item {
             SettingsBaseWidget(
                 icon = Icons.TwoTone.DeveloperBoard.takeIf { showHomeCardIcons },
@@ -889,17 +1001,6 @@ private fun InfoCard(
         }
 
         item(
-            visible = !isSimpleMode && systemInfo.zygiskImplement.isNotEmpty() && systemInfo.zygiskImplement != "None",
-        ) {
-            SettingsBaseWidget(
-                icon = Icons.TwoTone.Extension.takeIf { showHomeCardIcons },
-                iconPlaceholder = false,
-                title = stringResource(R.string.home_zygisk_implement),
-                description = systemInfo.zygiskImplement,
-            )
-        }
-
-        item(
             visible = !isSimpleMode && systemInfo.metaModuleImplement.isNotEmpty() && systemInfo.metaModuleImplement != "None",
         ) {
             SettingsBaseWidget(
@@ -907,6 +1008,94 @@ private fun InfoCard(
                 iconPlaceholder = false,
                 title = stringResource(R.string.home_meta_module_implement),
                 description = systemInfo.metaModuleImplement,
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickActionsCard(
+    onReboot: (String) -> Unit,
+    onClickInstall: () -> Unit,
+) {
+    SegmentedColumn(
+        title = stringResource(R.string.home_quick_actions),
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                QuickActionButton(
+                    modifier = Modifier.weight(1f),
+                    title = stringResource(R.string.quick_action_reboot),
+                    icon = Icons.TwoTone.RestartAlt,
+                    onClick = { onReboot("") },
+                )
+                QuickActionButton(
+                    modifier = Modifier.weight(1f),
+                    title = stringResource(R.string.quick_action_soft_reboot),
+                    icon = Icons.TwoTone.Refresh,
+                    onClick = { onReboot("soft_reboot") },
+                )
+                QuickActionButton(
+                    modifier = Modifier.weight(1f),
+                    title = stringResource(R.string.quick_action_recovery),
+                    icon = Icons.TwoTone.Build,
+                    onClick = { onReboot("recovery") },
+                )
+                QuickActionButton(
+                    modifier = Modifier.weight(1f),
+                    title = stringResource(R.string.quick_action_bootloader),
+                    icon = Icons.TwoTone.Terminal,
+                    onClick = { onReboot("bootloader") },
+                )
+                QuickActionButton(
+                    modifier = Modifier.weight(1f),
+                    title = stringResource(R.string.quick_action_flash),
+                    icon = Icons.TwoTone.Publish,
+                    onClick = onClickInstall,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickActionButton(
+    modifier: Modifier = Modifier,
+    title: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    Button(
+        modifier = modifier.height(64.dp),
+        onClick = onClick,
+        shape = MaterialTheme.shapes.medium,
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
             )
         }
     }
