@@ -1592,6 +1592,7 @@ pub fn rearm() -> Result<()> {
     send_rearm(&tracer)
 }
 
+#[allow(dead_code)]
 pub fn ensure_armed() -> Result<()> {
     if !is_enabled() {
         return Ok(());
