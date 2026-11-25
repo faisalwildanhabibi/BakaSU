@@ -289,7 +289,7 @@ private fun HmaOverviewTab(
                             icon = Icons.TwoTone.Sync,
                             title = stringResource(R.string.hma_sync_action),
                             description = stringResource(R.string.hma_sync_summary),
-                            onClick = onSyncRules,
+                            onClick = { onSyncRules() },
                         )
                     }
                 },

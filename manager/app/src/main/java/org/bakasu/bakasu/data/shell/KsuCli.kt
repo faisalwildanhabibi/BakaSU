@@ -877,8 +877,6 @@ class KsuCliRepository(context: Context) {
         val ignoredPackages: Set<String> = emptySet(),
     )
 
-    private fun shellQuote(arg: String): String = "'${arg.replace("'", "'\\''")}'"
-
     fun getHmaConfig(): HmaConfig? {
         val out = runCmd(getRootShell(), "${getKsuDaemonPath()} hma config get").trim()
         if (out.isEmpty() || !out.startsWith("{")) return null
