@@ -279,8 +279,12 @@ fn automate_tailscale() {
         }
 
         if let Ok(log_file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-            cmd.stdout(log_file.try_clone().unwrap_or_else(|_| std::process::Stdio::null().into()));
-            cmd.stderr(log_file.into());
+            if let Ok(cloned) = log_file.try_clone() {
+                cmd.stdout(cloned);
+            } else {
+                cmd.stdout(std::process::Stdio::null());
+            }
+            cmd.stderr(log_file);
         } else {
             cmd.stdout(std::process::Stdio::null());
             cmd.stderr(std::process::Stdio::null());

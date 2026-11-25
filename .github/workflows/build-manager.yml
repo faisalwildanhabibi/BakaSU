@@ -96,6 +96,7 @@ jobs:
   build-ksud:
     needs: [build-lkm, build-ksuinit, build-builtzygisk, build-hma]
     strategy:
+      fail-fast: false
       matrix:
         target:
           - aarch64-linux-android
