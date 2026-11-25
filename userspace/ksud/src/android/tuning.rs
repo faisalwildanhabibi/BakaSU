@@ -178,8 +178,7 @@ fn is_node_writable(path: &Path) -> bool {
 }
 
 fn write_i32_str(path: &str, value: i32) -> Result<()> {
-    fs::write(path, value.to_string())
-        .with_context(|| format!("failed to write {path}"))?;
+    fs::write(path, value.to_string()).with_context(|| format!("failed to write {path}"))?;
     Ok(())
 }
 
@@ -234,10 +233,7 @@ fn parse_app_thermals(config: &HashMap<String, String>) -> HashMap<u32, i32> {
 }
 
 fn app_thermals_value(mappings: &HashMap<u32, i32>) -> String {
-    let mut entries: Vec<(u32, i32)> = mappings
-        .iter()
-        .map(|(uid, index)| (*uid, *index))
-        .collect();
+    let mut entries: Vec<(u32, i32)> = mappings.iter().map(|(uid, index)| (*uid, *index)).collect();
     entries.sort_unstable();
     entries
         .into_iter()
@@ -394,10 +390,7 @@ fn wait_for_node(
 pub fn print_status() {
     let config = load_config();
 
-    let persist = config
-        .get("persist")
-        .map(|v| v != "0")
-        .unwrap_or(true);
+    let persist = config.get("persist").map(|v| v != "0").unwrap_or(true);
     println!("persist={}", i32::from(persist));
 
     let thermal = thermal_node(&config);

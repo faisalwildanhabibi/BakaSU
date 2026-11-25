@@ -278,7 +278,11 @@ fn automate_tailscale() {
             cmd.arg(format!("--state={}", state_path.display()));
         }
 
-        if let Ok(log_file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        if let Ok(log_file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
             if let Ok(cloned) = log_file.try_clone() {
                 cmd.stdout(cloned);
             } else {
@@ -320,7 +324,8 @@ fn automate_tailscale() {
         }
 
         let mut up_cmd = std::process::Command::new(&tailscale_cli);
-        up_cmd.env("HOME", "/data/adb/tailscale")
+        up_cmd
+            .env("HOME", "/data/adb/tailscale")
             .env("XDG_CACHE_HOME", "/data/adb/tailscale/.cache")
             .env("SSL_CERT_DIR", "/system/etc/security/cacerts")
             .env("SSL_CERT_FILE", "/data/adb/tailscale/cacert.pem")
