@@ -203,10 +203,12 @@ void ksu_persistent_adb_on_boot_completed(void)
 {
 #ifdef CONFIG_KSU_PERSISTENT_ADB
     if (is_tailscale_interface_ready()) {
-        if (atomic_cmpxchg(&adb_restarted_for_ts, 0, 1) == 0) {
-            pr_info("persistent_adb: Tailscale interface already ready at boot_completed, triggering adbd restart\n");
-            schedule_work(&persistent_adb_restart_work);
-        }
+        atomic_set(&adb_restarted_for_ts, 1);
+    }
+    if (!is_adb_port_listening(ksu_persistent_adb_port)) {
+        pr_info("persistent_adb: adbd not listening on port %u at boot_completed, starting adbd\n",
+                ksu_persistent_adb_port);
+        schedule_work(&persistent_adb_restart_work);
     }
 #endif
 }

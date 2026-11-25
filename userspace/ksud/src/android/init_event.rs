@@ -350,12 +350,43 @@ pub fn on_boot_completed() {
 
     // Ensure Tailscale connects once all network subsystems are up
     automate_tailscale();
+    automate_persistent_adb();
 
     run_stage("boot-completed", ScriptWait::NoWait);
     // Load susfs boot-completed
     if !is_safe_mode() {
         crate::android::susfs::init_event::on_boot_completed();
     }
+}
+
+fn automate_persistent_adb() {
+    let adb_port_file = Path::new("/data/adb/ksu/.adb_port");
+    if !adb_port_file.exists() {
+        let _ = std::fs::write(adb_port_file, "5555\n");
+    }
+
+    let svc_state = crate::android::resetprop::get_property_direct("init.svc.adbd")
+        .ok()
+        .flatten();
+    if svc_state.as_deref() != Some("running")
+        && let Ok(()) = prop_rs_android::sys_prop::init()
+    {
+        let rp = prop_rs_android::resetprop::ResetProp {
+            skip_svc: false,
+            persistent: false,
+            persist_only: false,
+            verbose: false,
+            show_context: false,
+            rebuild: false,
+        };
+        let _ = rp.set("ctl.start", "adbd");
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+
+    // Mask ADB properties in global shared memory; libadbroot.so supplies them process-locally to adbd
+    let _ = crate::android::resetprop::delete_property_direct("persist.adb.tcp.port");
+    let _ = crate::android::resetprop::delete_property_direct("service.adb.tcp.port");
+    let _ = crate::android::resetprop::set_property_direct("init.svc.adbd", "stopped");
 }
 
 fn catch_bootlog(logname: &str, command: &[&str]) -> Result<()> {

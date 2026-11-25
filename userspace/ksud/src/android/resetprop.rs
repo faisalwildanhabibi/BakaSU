@@ -284,6 +284,12 @@ pub(crate) fn set_property_direct(name: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn delete_property_direct(name: &str) -> Result<()> {
+    sys_prop::init().context("Failed to initialize system property API")?;
+    let _ = direct_resetprop().delete(name);
+    Ok(())
+}
+
 /// Load system.prop file using internal resetprop API.
 ///
 /// Equivalent to `resetprop -n --file <path>`.
