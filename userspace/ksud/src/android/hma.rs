@@ -796,7 +796,13 @@ pub fn sync_uid_scope() -> Result<usize> {
                     let is_user_range = (10000..=19999).contains(&uid)
                         && (data_dir.starts_with("/data/user/")
                             || data_dir.starts_with("/data/data/"));
-                    if !is_user_range {
+                    let seinfo = parts.get(4).copied().unwrap_or("");
+                    let installer = parts.last().copied().unwrap_or("");
+                    let is_system_pkg = !is_user_range
+                        || seinfo.contains(":partition=")
+                        || seinfo.contains(":privapp")
+                        || installer == "@system";
+                    if is_system_pkg {
                         system_packages.insert(pkg_name.to_string());
                     }
 
@@ -805,7 +811,7 @@ pub fn sync_uid_scope() -> Result<usize> {
 
                     if is_root_granted || is_preset_hidden {
                         hidden_packages.insert(pkg_name.to_string());
-                    } else if is_user_range {
+                    } else if !is_system_pkg {
                         user_non_root_apps.push((pkg_name.to_string(), uid));
                     }
                 }
@@ -853,6 +859,12 @@ pub fn sync_uid_scope() -> Result<usize> {
         config_obj["scope"] = serde_json::json!({});
     }
     if let Some(scope) = config_obj.get_mut("scope").and_then(Value::as_object_mut) {
+        scope.retain(|pkg, _| {
+            let uid = all_packages.get(pkg).copied().unwrap_or(0);
+            !system_packages.contains(pkg)
+                && !root_granted_uids.contains(&uid)
+                && !LAUNCHER_AND_SYSTEM_UI_EXCLUDES.contains(&pkg.as_str())
+        });
         for (pkg, _uid) in &user_non_root_apps {
             if !scope.contains_key(pkg)
                 && !ignored.contains(pkg)

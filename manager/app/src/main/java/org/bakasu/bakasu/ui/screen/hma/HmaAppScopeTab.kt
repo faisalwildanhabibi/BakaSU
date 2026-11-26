@@ -46,8 +46,6 @@ fun HmaAppScopeTab(
     onUpdateScope: (enabled: Boolean, scope: KsuCliRepository.HmaAppScope) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    var showUserApps by remember { mutableStateOf(true) }
-    var showSystemApps by remember { mutableStateOf(false) }
     var onlyHidden by remember { mutableStateOf(false) }
     var onlyAffected by remember { mutableStateOf(false) }
     var editingPkg by remember { mutableStateOf<InstalledPackageInfo?>(null) }
@@ -61,22 +59,19 @@ fun HmaAppScopeTab(
         config.scope,
         hiddenPkgSet,
         query,
-        showUserApps,
-        showSystemApps,
         onlyHidden,
         onlyAffected,
     ) {
         val q = query.trim().lowercase()
         installedPackages.filter { pkg ->
-            val inScope = config.scope.containsKey(pkg.packageName)
-            val isHidden = hiddenPkgSet.contains(pkg.packageName)
-            val categoryMatch = (showUserApps && !pkg.isSystem) || (showSystemApps && pkg.isSystem)
-            val hiddenMatch = !onlyHidden || isHidden
-            val affectedMatch = !onlyAffected || inScope
-            val queryMatch = q.isEmpty() ||
-                pkg.appLabel.lowercase().contains(q) ||
-                pkg.packageName.lowercase().contains(q)
-            categoryMatch && hiddenMatch && affectedMatch && queryMatch
+            !pkg.isSystem &&
+                (!onlyHidden || hiddenPkgSet.contains(pkg.packageName)) &&
+                (!onlyAffected || config.scope.containsKey(pkg.packageName)) &&
+                (
+                    q.isEmpty() ||
+                        pkg.appLabel.lowercase().contains(q) ||
+                        pkg.packageName.lowercase().contains(q)
+                    )
         }.sortedWith(
             compareByDescending<InstalledPackageInfo> { config.scope.containsKey(it.packageName) }
                 .thenBy { it.appLabel.lowercase() },
@@ -96,7 +91,7 @@ fun HmaAppScopeTab(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("Search target apps...") },
+                    placeholder = { Text("Search target user apps...") },
                     leadingIcon = { Icon(Icons.TwoTone.Search, contentDescription = null) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -108,14 +103,12 @@ fun HmaAppScopeTab(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     FilterChip(
-                        selected = showUserApps,
-                        onClick = { showUserApps = !showUserApps },
+                        selected = !onlyHidden && !onlyAffected,
+                        onClick = {
+                            onlyHidden = false
+                            onlyAffected = false
+                        },
                         label = { Text("Apps") },
-                    )
-                    FilterChip(
-                        selected = showSystemApps,
-                        onClick = { showSystemApps = !showSystemApps },
-                        label = { Text("System") },
                     )
                     FilterChip(
                         selected = onlyHidden,
