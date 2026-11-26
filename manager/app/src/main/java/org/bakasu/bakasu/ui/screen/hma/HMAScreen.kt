@@ -71,14 +71,17 @@ fun HMAScreen() {
     var selectedTab by remember { mutableIntStateOf(0) }
     var hmaStatus by remember { mutableStateOf(KsuCliRepository.HmaStatus()) }
     var hmaConfig by remember { mutableStateOf(KsuCliRepository.HmaConfig()) }
+    var hmaPathsConfig by remember { mutableStateOf(KsuCliRepository.HmaPathsConfig()) }
 
     fun refreshAll() {
         scope.launch(Dispatchers.IO) {
             val status = ksuCli.getHmaStatus()
             val config = ksuCli.getHmaConfig()
+            val paths = ksuCli.getHmaPathsConfig()
             withContext(Dispatchers.Main) {
                 if (status != null) hmaStatus = status
                 if (config != null) hmaConfig = config
+                if (paths != null) hmaPathsConfig = paths
             }
         }
     }
@@ -100,7 +103,7 @@ fun HMAScreen() {
         }
     }
 
-    val tabs = listOf("Settings", "App Scope", "Templates")
+    val tabs = listOf("Settings", "Scope", "Templates", "Paths")
 
     Scaffold(
         topBar = {
@@ -236,6 +239,44 @@ fun HMAScreen() {
                         val ok = ksuCli.deleteHmaTemplate(name)
                         snackBarHost.showReplacingSnackbar(
                             if (ok) "Template '$name' deleted" else "Failed to delete template",
+                        )
+                        refreshAll()
+                    }
+                },
+            )
+
+            3 -> HmaPathsTab(
+                pathsConfig = hmaPathsConfig,
+                installedPackages = installedPackages,
+                contentPadding = listPadding,
+                onToggleAutoHide = { enabled ->
+                    hmaPathsConfig = hmaPathsConfig.copy(autoHideAppPaths = enabled)
+                    scope.launch(Dispatchers.IO) {
+                        val ok = ksuCli.setHmaAutoHideAppPaths(enabled)
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) {
+                                "Auto-hide app paths ${if (enabled) "enabled" else "disabled"}"
+                            } else {
+                                "Failed to update auto-hide setting"
+                            },
+                        )
+                        refreshAll()
+                    }
+                },
+                onSaveGlobalPaths = { paths ->
+                    scope.launch(Dispatchers.IO) {
+                        val ok = ksuCli.setHmaGlobalPaths(paths)
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) "Global hidden paths updated" else "Failed to update global paths",
+                        )
+                        refreshAll()
+                    }
+                },
+                onSaveAppPaths = { pkg, paths ->
+                    scope.launch(Dispatchers.IO) {
+                        val ok = ksuCli.setHmaAppPaths(pkg, paths)
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) "Updated hidden paths for $pkg" else "Failed to update paths for $pkg",
                         )
                         refreshAll()
                     }

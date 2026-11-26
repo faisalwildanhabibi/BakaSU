@@ -376,6 +376,30 @@ pub enum HmaCommand {
         #[command(subcommand)]
         command: HmaScopeCommand,
     },
+    /// Manage TargetedHide-style per-app and global path hiding
+    Paths {
+        #[command(subcommand)]
+        command: HmaPathsCommand,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum HmaPathsCommand {
+    /// Print HMA path hiding configuration as JSON
+    Get,
+    /// Toggle automatic hiding of hidden apps' install and data directories
+    SetAuto { enabled: String },
+    /// Set global hidden paths (comma-separated, supports `!` exclusions)
+    SetGlobal {
+        #[arg(default_value = "")]
+        paths: String,
+    },
+    /// Set per-app hidden paths (comma-separated, supports `!` exclusions)
+    SetApp {
+        package: String,
+        #[arg(default_value = "")]
+        paths: String,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -1485,6 +1509,28 @@ pub fn run() -> Result<()> {
                 }
                 HmaScopeCommand::Remove { package } => {
                     crate::android::hma::remove_scope(&package)?;
+                    println!("true");
+                    Ok(())
+                }
+            },
+            HmaCommand::Paths { command } => match command {
+                HmaPathsCommand::Get => {
+                    println!("{}", crate::android::hma::get_paths_config_json()?);
+                    Ok(())
+                }
+                HmaPathsCommand::SetAuto { enabled } => {
+                    let parsed = matches!(enabled.as_str(), "1" | "true" | "True" | "TRUE");
+                    crate::android::hma::set_auto_hide_app_paths(parsed)?;
+                    println!("true");
+                    Ok(())
+                }
+                HmaPathsCommand::SetGlobal { paths } => {
+                    crate::android::hma::set_global_paths(&paths)?;
+                    println!("true");
+                    Ok(())
+                }
+                HmaPathsCommand::SetApp { package, paths } => {
+                    crate::android::hma::set_app_paths(&package, &paths)?;
                     println!("true");
                     Ok(())
                 }

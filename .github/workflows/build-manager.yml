@@ -191,7 +191,7 @@ jobs:
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             export KSU_PACKAGE_NAME="org.bakasu.bakasu.pr${{github.event.pull_request.number}}"
             export BUILD_EXTRA_ARGS="-PKSU_PACKAGE_NAME=$KSU_PACKAGE_NAME"
-          elif [ "${{ github.ref_type }}" != "tag" ] && [ "${{ github.ref_name }}" != "main" ]; then
+          elif [ "${{ github.ref_type }}" != "tag" ] && [ "${{ github.ref_name }}" != "main" ] && [ "${{ github.ref_name }}" != "custom/main" ]; then
             export KSU_PACKAGE_NAME="org.bakasu.bakasu.dev"
             export KSU_NAME="BakaSU-DEV"
             export BUILD_EXTRA_ARGS="-PKSU_PACKAGE_NAME=$KSU_PACKAGE_NAME -PKSU_NAME=$KSU_NAME"
@@ -304,7 +304,7 @@ jobs:
 
   publish-release:
     name: Publish Manager to Release
-    needs: repack-manager
+    needs: [repack-manager, prepare]
     if: github.ref == 'refs/heads/custom/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -340,6 +340,9 @@ jobs:
             - **Target Device**: Poco F3 / Redmi K40 / Mi 11X (`alioth`)
             - **Architecture**: ARM64-v8a (aarch64)
             - **Variant**: Release
+            - **Package Name**: `org.bakasu.bakasu`
+            - **Dynamic Manager Signature Size**: `${{ needs.prepare.outputs.expected_size || 'Production Keystore' }}`
+            - **Dynamic Manager Signature SHA256**: `${{ needs.prepare.outputs.expected_hash || 'Production Keystore' }}`
             - **Commit**: ${{ github.sha }}
             - **Branch**: `${{ github.ref_name }}`
             

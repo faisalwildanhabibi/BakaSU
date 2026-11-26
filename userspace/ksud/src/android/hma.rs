@@ -6,13 +6,14 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use log::info;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
+    process::Command,
 };
 
 pub const PRESET_HIDDEN_PACKAGES: &[&str] = &[
@@ -352,6 +353,304 @@ pub fn set_scope(package: &str, app_config_json: &str) -> Result<()> {
     Ok(())
 }
 
+const HMA_PATHS_CONFIG_PATH: &str = "/data/adb/ksu/.hma_paths.json";
+const HMA_NM_STATE_PATH: &str = "/data/adb/ksu/.hma_nm_state.json";
+const NOMOUNT_BIN: &str = "/data/adb/modules/nomount/bin/nm";
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct HmaPathsConfig {
+    #[serde(default = "default_true")]
+    pub auto_hide_app_paths: bool,
+    #[serde(default)]
+    pub global_paths: Vec<String>,
+    #[serde(default)]
+    pub per_app_paths: HashMap<String, Vec<String>>,
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+impl Default for HmaPathsConfig {
+    fn default() -> Self {
+        Self {
+            auto_hide_app_paths: true,
+            global_paths: Vec::new(),
+            per_app_paths: HashMap::new(),
+        }
+    }
+}
+
+fn read_paths_config() -> HmaPathsConfig {
+    fs::read_to_string(HMA_PATHS_CONFIG_PATH)
+        .ok()
+        .and_then(|s| serde_json::from_str::<HmaPathsConfig>(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_paths_config(cfg: &HmaPathsConfig) -> Result<()> {
+    let json = serde_json::to_string_pretty(cfg)?;
+    fs::write(HMA_PATHS_CONFIG_PATH, json)
+        .with_context(|| format!("Failed to write {HMA_PATHS_CONFIG_PATH}"))
+}
+
+pub fn get_paths_config_json() -> Result<String> {
+    let cfg = read_paths_config();
+    Ok(serde_json::to_string_pretty(&cfg)?)
+}
+
+pub fn set_auto_hide_app_paths(enabled: bool) -> Result<()> {
+    let mut cfg = read_paths_config();
+    cfg.auto_hide_app_paths = enabled;
+    write_paths_config(&cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+fn parse_csv_paths(csv: &str) -> Vec<String> {
+    csv.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+pub fn set_global_paths(paths_csv: &str) -> Result<()> {
+    let mut cfg = read_paths_config();
+    cfg.global_paths = parse_csv_paths(paths_csv);
+    write_paths_config(&cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+pub fn set_app_paths(package: &str, paths_csv: &str) -> Result<()> {
+    let mut cfg = read_paths_config();
+    let parsed = parse_csv_paths(paths_csv);
+    if parsed.is_empty() {
+        cfg.per_app_paths.remove(package);
+    } else {
+        cfg.per_app_paths.insert(package.to_string(), parsed);
+    }
+    write_paths_config(&cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+fn collect_data_app_dirs() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let data_app = Path::new("/data/app");
+    let Ok(entries) = fs::read_dir(data_app) else {
+        return map;
+    };
+
+    let mut register_dir = |dir_path: &Path| {
+        let Some(name) = dir_path.file_name().and_then(|n| n.to_str()) else {
+            return;
+        };
+        if let Some((pkg, _)) = name.split_once('-') {
+            map.insert(pkg.to_string(), dir_path.to_string_lossy().into_owned());
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.starts_with("~~") {
+            if let Ok(sub_entries) = fs::read_dir(&path) {
+                for sub in sub_entries.flatten() {
+                    let sub_path = sub.path();
+                    if sub_path.is_dir() {
+                        register_dir(&sub_path);
+                    }
+                }
+            }
+        } else {
+            register_dir(&path);
+        }
+    }
+    map
+}
+
+fn resolve_hidden_packages_for_app(
+    target_pkg: &str,
+    app_cfg: &Value,
+    templates: Option<&serde_json::Map<String, Value>>,
+    all_packages: &HashMap<String, u32>,
+    system_packages: &HashSet<String>,
+) -> HashSet<String> {
+    let use_whitelist = app_cfg
+        .get("useWhitelist")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let exclude_system = app_cfg
+        .get("excludeSystemApps")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    let mut listed_pkgs: HashSet<String> = HashSet::new();
+    if let Some(extra) = app_cfg.get("extraAppList").and_then(Value::as_array) {
+        for item in extra {
+            if let Some(pkg) = item.as_str() {
+                listed_pkgs.insert(pkg.to_string());
+            }
+        }
+    }
+
+    if let (Some(tpl_map), Some(applied)) = (
+        templates,
+        app_cfg.get("applyTemplates").and_then(Value::as_array),
+    ) {
+        for tpl_name in applied.iter().filter_map(Value::as_str) {
+            if let Some(tpl) = tpl_map.get(tpl_name) {
+                let tpl_whitelist = tpl
+                    .get("isWhitelist")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                if tpl_whitelist == use_whitelist
+                    && let Some(app_list) = tpl.get("appList").and_then(Value::as_array)
+                {
+                    for pkg in app_list.iter().filter_map(Value::as_str) {
+                        listed_pkgs.insert(pkg.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut hidden_pkgs: HashSet<String> = HashSet::new();
+    if use_whitelist {
+        for pkg in all_packages.keys() {
+            if pkg == target_pkg || listed_pkgs.contains(pkg) {
+                continue;
+            }
+            if exclude_system && system_packages.contains(pkg) {
+                continue;
+            }
+            hidden_pkgs.insert(pkg.clone());
+        }
+    } else {
+        for pkg in listed_pkgs {
+            if pkg != target_pkg && all_packages.contains_key(&pkg) {
+                hidden_pkgs.insert(pkg);
+            }
+        }
+    }
+    hidden_pkgs
+}
+
+fn sync_targeted_paths(
+    enabled: bool,
+    config_obj: &Value,
+    all_packages: &HashMap<String, u32>,
+    system_packages: &HashSet<String>,
+) {
+    let paths_cfg = read_paths_config();
+    let templates_map = config_obj.get("templates").and_then(Value::as_object);
+    let mut desired_rules: HashSet<(u32, String)> = HashSet::new();
+
+    if enabled
+        && let Some(scope_map) = config_obj.get("scope").and_then(Value::as_object)
+    {
+        let data_app_dirs = if paths_cfg.auto_hide_app_paths {
+            collect_data_app_dirs()
+        } else {
+            HashMap::new()
+        };
+
+        for (target_pkg, app_cfg) in scope_map {
+            let Some(&target_uid) = all_packages.get(target_pkg) else {
+                continue;
+            };
+
+            let raw_list = paths_cfg
+                .per_app_paths
+                .get(target_pkg)
+                .unwrap_or(&paths_cfg.global_paths);
+
+            let mut exceptions: HashSet<String> = HashSet::new();
+            let mut explicit_paths: Vec<String> = Vec::new();
+            for item in raw_list {
+                if let Some(exc) = item.strip_prefix('!') {
+                    let trimmed = exc.trim();
+                    if !trimmed.is_empty() {
+                        exceptions.insert(trimmed.to_string());
+                    }
+                } else if item.starts_with('/') {
+                    explicit_paths.push(item.clone());
+                }
+            }
+
+            if paths_cfg.auto_hide_app_paths {
+                let hidden_pkgs = resolve_hidden_packages_for_app(
+                    target_pkg,
+                    app_cfg,
+                    templates_map,
+                    all_packages,
+                    system_packages,
+                );
+                for h_pkg in hidden_pkgs {
+                    if exceptions.contains(&h_pkg) {
+                        continue;
+                    }
+                    if let Some(app_dir) = data_app_dirs.get(&h_pkg)
+                        && !exceptions.contains(app_dir)
+                    {
+                        desired_rules.insert((target_uid, app_dir.clone()));
+                    }
+                    for p in [
+                        format!("/data/data/{h_pkg}"),
+                        format!("/data/user/0/{h_pkg}"),
+                        format!("/storage/emulated/0/Android/data/{h_pkg}"),
+                    ] {
+                        if !exceptions.contains(&p) && Path::new(&p).exists() {
+                            desired_rules.insert((target_uid, p));
+                        }
+                    }
+                }
+            }
+
+            for p in explicit_paths {
+                if !exceptions.contains(&p) {
+                    desired_rules.insert((target_uid, p));
+                }
+            }
+        }
+    }
+
+    if Path::new(NOMOUNT_BIN).exists() {
+        let prev_rules: HashSet<(u32, String)> = fs::read_to_string(HMA_NM_STATE_PATH)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Vec<(u32, String)>>(&s).ok())
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_default();
+
+        for (uid, path) in prev_rules.difference(&desired_rules) {
+            let _ = Command::new(NOMOUNT_BIN)
+                .args(["rule", "del", "--uid", &uid.to_string(), path])
+                .status();
+        }
+        for (uid, path) in desired_rules.difference(&prev_rules) {
+            let _ = Command::new(NOMOUNT_BIN)
+                .args(["rule", "add", "--whiteout", "--uid", &uid.to_string(), path])
+                .status();
+        }
+
+        let state_vec: Vec<(u32, String)> = desired_rules.into_iter().collect();
+        if let Ok(json) = serde_json::to_string(&state_vec) {
+            let _ = fs::write(HMA_NM_STATE_PATH, json);
+        }
+    } else if enabled {
+        for item in &paths_cfg.global_paths {
+            if item.starts_with('/') {
+                let _ = crate::android::susfs::api::prelude::add_sus_path(item, true);
+            }
+        }
+    }
+}
+
 pub fn remove_scope(package: &str) -> Result<()> {
     let hma_dir = find_or_create_active_hma_dir()?;
     let mut cfg = read_or_init_config(&hma_dir);
@@ -618,6 +917,8 @@ pub fn sync_uid_scope() -> Result<usize> {
     let active_content = format!("{boot_id} {generation}\n");
     fs::write(&active_path, active_content)
         .with_context(|| format!("Failed to write {}", active_path.display()))?;
+
+    sync_targeted_paths(is_enabled(), &config_obj, &all_packages, &system_packages);
 
     info!(
         "HMA hybrid isolation synced: {} target apps protected",

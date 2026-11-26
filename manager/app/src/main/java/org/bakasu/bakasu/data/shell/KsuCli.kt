@@ -991,4 +991,54 @@ class KsuCliRepository(context: Context) {
     }
 
     fun removeHmaAppScope(packageName: String): Boolean = execKsud("hma scope remove ${shellQuote(packageName)}", true)
+
+    data class HmaPathsConfig(
+        val autoHideAppPaths: Boolean = true,
+        val globalPaths: List<String> = emptyList(),
+        val perAppPaths: Map<String, List<String>> = emptyMap(),
+    )
+
+    fun getHmaPathsConfig(): HmaPathsConfig? {
+        val out = runCmd(getRootShell(), "${getKsuDaemonPath()} hma paths get").trim()
+        if (out.isEmpty() || !out.startsWith("{")) return null
+        return try {
+            val json = org.json.JSONObject(out)
+            val globalList = mutableListOf<String>()
+            val gArr = json.optJSONArray("global_paths")
+            if (gArr != null) {
+                for (i in 0 until gArr.length()) {
+                    gArr.optString(i).takeIf { it.isNotEmpty() }?.let { globalList.add(it) }
+                }
+            }
+            val perAppMap = linkedMapOf<String, List<String>>()
+            val pObj = json.optJSONObject("per_app_paths")
+            if (pObj != null) {
+                val keys = pObj.keys()
+                while (keys.hasNext()) {
+                    val pkg = keys.next()
+                    val arr = pObj.optJSONArray(pkg) ?: continue
+                    val list = mutableListOf<String>()
+                    for (i in 0 until arr.length()) {
+                        arr.optString(i).takeIf { it.isNotEmpty() }?.let { list.add(it) }
+                    }
+                    perAppMap[pkg] = list
+                }
+            }
+            HmaPathsConfig(
+                autoHideAppPaths = json.optBoolean("auto_hide_app_paths", true),
+                globalPaths = globalList,
+                perAppPaths = perAppMap,
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse HMA paths config", e)
+            null
+        }
+    }
+
+    fun setHmaAutoHideAppPaths(enabled: Boolean): Boolean = execKsud("hma paths set-auto $enabled", true)
+
+    fun setHmaGlobalPaths(paths: List<String>): Boolean = execKsud("hma paths set-global ${shellQuote(paths.joinToString(","))}", true)
+
+    fun setHmaAppPaths(packageName: String, paths: List<String>): Boolean =
+        execKsud("hma paths set-app ${shellQuote(packageName)} ${shellQuote(paths.joinToString(","))}", true)
 }
