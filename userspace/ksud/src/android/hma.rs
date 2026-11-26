@@ -45,7 +45,21 @@ pub struct HmaStatus {
 
 pub fn is_installed() -> bool {
     let dir = Path::new(BUILTIN_HMA_DIR);
-    dir.is_dir() && dir.join("zygisk/arm64-v8a.so").exists()
+    if dir.is_dir() && dir.join("zygisk/arm64-v8a.so").exists() {
+        return true;
+    }
+    let has_config_dir = dir.is_dir()
+        || fs::read_dir("/data/misc")
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|n| n.starts_with("hide_my_applist"))
+            });
+    has_config_dir && crate::android::builtin_zygisk::implementation_info().state == "running"
 }
 
 /// HMA is disabled by default unless explicitly enabled by the user
@@ -213,6 +227,7 @@ fn read_or_init_config(hma_dir: &Path) -> Value {
         ("errorOnlyLog", serde_json::json!(false)),
         ("maxLogSize", serde_json::json!(512)),
         ("ignoredPackagesForPresets", serde_json::json!([])),
+        ("settingsTemplates", serde_json::json!({})),
         ("templates", serde_json::json!({})),
         ("scope", serde_json::json!({})),
     ];
@@ -825,12 +840,24 @@ pub fn sync_uid_scope() -> Result<usize> {
         })
         .unwrap_or_default();
 
+    const LAUNCHER_AND_SYSTEM_UI_EXCLUDES: &[&str] = &[
+        "com.google.android.apps.nexuslauncher",
+        "com.android.launcher3",
+        "com.miui.home",
+        "com.sec.android.app.launcher",
+        "com.oppo.launcher",
+        "com.oneplus.launcher",
+        "com.android.settings",
+    ];
     if config_obj.get("scope").and_then(Value::as_object).is_none() {
         config_obj["scope"] = serde_json::json!({});
     }
     if let Some(scope) = config_obj.get_mut("scope").and_then(Value::as_object_mut) {
         for (pkg, _uid) in &user_non_root_apps {
-            if !scope.contains_key(pkg) && !ignored.contains(pkg) {
+            if !scope.contains_key(pkg)
+                && !ignored.contains(pkg)
+                && !LAUNCHER_AND_SYSTEM_UI_EXCLUDES.contains(&pkg.as_str())
+            {
                 scope.insert(
                     pkg.clone(),
                     serde_json::json!({
@@ -859,8 +886,19 @@ pub fn sync_uid_scope() -> Result<usize> {
         return Ok(0);
     }
 
-    let generation = "g0";
-    let gen_dir = uid_scope_dir.join(generation);
+    let prev_gen_num = fs::read_to_string(&active_path).ok().and_then(|s| {
+        let mut parts = s.split_whitespace();
+        let prev_boot = parts.next()?;
+        let prev_gen = parts.next()?;
+        if prev_boot == boot_id {
+            prev_gen.strip_prefix('g')?.parse::<u64>().ok()
+        } else {
+            None
+        }
+    });
+    let next_gen_num = prev_gen_num.map_or(0, |n| n + 1);
+    let generation = format!("g{next_gen_num}");
+    let gen_dir = uid_scope_dir.join(&generation);
     ensure_dir_exists(&gen_dir)?;
 
     let templates_map = config_obj.get("templates").and_then(Value::as_object);
@@ -915,6 +953,19 @@ pub fn sync_uid_scope() -> Result<usize> {
     let active_content = format!("{boot_id} {generation}\n");
     fs::write(&active_path, active_content)
         .with_context(|| format!("Failed to write {}", active_path.display()))?;
+
+    if let Ok(entries) = fs::read_dir(&uid_scope_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && name.starts_with('g')
+                && name != generation
+            {
+                let _ = fs::remove_dir_all(path);
+            }
+        }
+    }
 
     sync_targeted_paths(is_enabled(), &config_obj, &all_packages, &system_packages);
 

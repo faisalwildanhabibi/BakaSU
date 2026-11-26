@@ -747,4 +747,7 @@
     <string name="hma_status_active">Active</string>
     <string name="hma_status_disabled">Disabled</string>
     <string name="home_hma_info">HMA &amp; UID Guard</string>
+    <string name="nav_ktune">KTune</string>
+    <string name="nav_zygisk">Zygisk</string>
+    <string name="nav_hma">HMA</string>
 </resources>

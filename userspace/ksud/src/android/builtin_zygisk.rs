@@ -611,6 +611,11 @@ fn installed_modules() -> Vec<InjectedModule> {
             abi.push("32".to_owned());
         }
         let (name, version) = module_identity(&id);
+        let state = if provider_info().state == "running" {
+            "loaded".to_owned()
+        } else {
+            "unknown".to_owned()
+        };
         modules.push(InjectedModule {
             id,
             name,
@@ -619,7 +624,7 @@ fn installed_modules() -> Vec<InjectedModule> {
             abi,
             targets: Vec::new(),
             companion: false,
-            state: "unknown".to_owned(),
+            state,
             processes: Vec::new(),
         });
     }

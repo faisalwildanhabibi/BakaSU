@@ -30,6 +30,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.twotone.MenuBook
+import androidx.compose.material.icons.twotone.AdminPanelSettings
 import androidx.compose.material.icons.twotone.Android
 import androidx.compose.material.icons.twotone.BatteryChargingFull
 import androidx.compose.material.icons.twotone.Block
@@ -119,6 +120,8 @@ import org.bakasu.bakasu.ui.screen.LabelText
 import org.bakasu.bakasu.ui.theme.CardConfig
 import org.bakasu.bakasu.ui.theme.ThemeConfig
 import org.bakasu.bakasu.ui.theme.blurEffect
+import org.bakasu.bakasu.ui.screen.BottomBarDestination
+import org.bakasu.bakasu.ui.util.LocalHandlePageChange
 import org.bakasu.bakasu.ui.theme.blurSource
 import org.bakasu.bakasu.ui.util.LocalPermissionRequestInterface
 import org.bakasu.bakasu.ui.util.LocalSnackbarHost
@@ -360,12 +363,24 @@ fun HomePage(
 
                 if (uiState.systemStatus.isRootAvailable || uiState.systemStatus.ksuVersion != null) {
                     Spacer(modifier = Modifier.height(10.dp))
+                    val handlePageChange = LocalHandlePageChange.current
+                    val pages = remember(uiState.systemStatus.isFullFeatured) {
+                        BottomBarDestination.getPages(uiState.systemStatus.isFullFeatured)
+                    }
+                    val navigateToTab = { dest: BottomBarDestination, fallbackRoute: Route ->
+                        val idx = pages.indexOf(dest)
+                        if (idx >= 0) {
+                            handlePageChange(idx)
+                        } else {
+                            navigator.push(fallbackRoute)
+                        }
+                    }
                     QuickActionsCard(
-                        onReboot = { viewModel.dispatch(HomeUiAction.Reboot(it)) },
-                        onClickInstall = {
-                            if (uiState.systemStatus.isLateLoadMode) return@QuickActionsCard
-                            navigator.push(Route.Install(preselectedKernelUri = null))
-                        },
+                        onSuperuser = { navigateToTab(BottomBarDestination.SuperUser, Route.Home) },
+                        onModules = { navigateToTab(BottomBarDestination.Module, Route.Home) },
+                        onKTune = { navigateToTab(BottomBarDestination.KTune, Route.KTuneSettings) },
+                        onZygisk = { navigateToTab(BottomBarDestination.Zygisk, Route.ZygiskSettings) },
+                        onHma = { navigateToTab(BottomBarDestination.HMA, Route.HMASettings) },
                     )
                 }
             }
@@ -1036,8 +1051,11 @@ private fun InfoCard(
 
 @Composable
 private fun QuickActionsCard(
-    onReboot: (String) -> Unit,
-    onClickInstall: () -> Unit,
+    onSuperuser: () -> Unit,
+    onModules: () -> Unit,
+    onKTune: () -> Unit,
+    onZygisk: () -> Unit,
+    onHma: () -> Unit,
 ) {
     SegmentedColumn(
         title = stringResource(R.string.home_quick_actions),
@@ -1053,33 +1071,33 @@ private fun QuickActionsCard(
             ) {
                 QuickActionButton(
                     modifier = Modifier.weight(1f),
-                    title = stringResource(R.string.quick_action_reboot),
-                    icon = Icons.TwoTone.RestartAlt,
-                    onClick = { onReboot("") },
+                    title = stringResource(R.string.superuser),
+                    icon = Icons.TwoTone.AdminPanelSettings,
+                    onClick = onSuperuser,
                 )
                 QuickActionButton(
                     modifier = Modifier.weight(1f),
-                    title = stringResource(R.string.quick_action_soft_reboot),
-                    icon = Icons.TwoTone.Refresh,
-                    onClick = { onReboot("soft_reboot") },
+                    title = stringResource(R.string.module),
+                    icon = Icons.TwoTone.Extension,
+                    onClick = onModules,
                 )
                 QuickActionButton(
                     modifier = Modifier.weight(1f),
-                    title = stringResource(R.string.quick_action_recovery),
-                    icon = Icons.TwoTone.Build,
-                    onClick = { onReboot("recovery") },
+                    title = stringResource(R.string.nav_ktune),
+                    icon = Icons.TwoTone.Tune,
+                    onClick = onKTune,
                 )
                 QuickActionButton(
                     modifier = Modifier.weight(1f),
-                    title = stringResource(R.string.quick_action_bootloader),
-                    icon = Icons.TwoTone.Terminal,
-                    onClick = { onReboot("bootloader") },
+                    title = stringResource(R.string.nav_zygisk),
+                    icon = Icons.TwoTone.Security,
+                    onClick = onZygisk,
                 )
                 QuickActionButton(
                     modifier = Modifier.weight(1f),
-                    title = stringResource(R.string.quick_action_flash),
-                    icon = Icons.TwoTone.Publish,
-                    onClick = onClickInstall,
+                    title = stringResource(R.string.nav_hma),
+                    icon = Icons.TwoTone.VisibilityOff,
+                    onClick = onHma,
                 )
             }
         }

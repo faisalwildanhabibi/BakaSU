@@ -186,6 +186,8 @@ fun HmaTemplateEditorDialog(
 
     val isNew = existingTemplate == null
     val isPreset = existingTemplate?.name == "baka_root_preset"
+    val installedSet = remember(installedPackages) { installedPackages.map { it.packageName }.toSet() }
+    val installedCount = appList.count { it in installedSet }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -195,7 +197,13 @@ fun HmaTemplateEditorDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(if (isNew) "New Template" else "Edit Template")
+                Text(
+                    when {
+                        isNew -> "New Template"
+                        isPreset -> "Edit Preset"
+                        else -> "Edit Template"
+                    },
+                )
                 if (!isNew && !isPreset && onDelete != null) {
                     IconButton(onClick = { onDelete(existingTemplate.name) }) {
                         Icon(
@@ -250,7 +258,7 @@ fun HmaTemplateEditorDialog(
                     onClick = { showAppPicker = true },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Select Apps (${appList.size})")
+                    Text("Select Apps ($installedCount installed / ${appList.size} total)")
                 }
             }
         },

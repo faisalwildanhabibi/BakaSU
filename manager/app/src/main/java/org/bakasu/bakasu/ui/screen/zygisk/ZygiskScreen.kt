@@ -9,7 +9,6 @@ import androidx.compose.material.icons.automirrored.twotone.ArrowBack
 import androidx.compose.material.icons.twotone.Extension
 import androidx.compose.material.icons.twotone.Refresh
 import androidx.compose.material.icons.twotone.Security
-import androidx.compose.material.icons.twotone.Shield
 import androidx.compose.material.icons.twotone.TaskAlt
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -23,7 +22,6 @@ import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -32,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -51,162 +50,169 @@ import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ZygiskScreen() {
+fun ZygiskScreen(
+    showBackButton: Boolean = true,
+    bottomPadding: Dp = 0.dp,
+) {
     val navigator = LocalNavigator.current
     val ksuCli = koinInject<KsuCliRepository>()
     val snackBarHost = LocalSnackbarHost.current
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
-    var isZygiskEnabled by remember { mutableStateOf(false) }
-    var isNomountGuardEnabled by remember { mutableStateOf(true) }
-    var activeModulesCount by remember { mutableIntStateOf(0) }
+    var isBuiltinEnabled by remember { mutableStateOf(false) }
+    var zygiskInfo by remember { mutableStateOf(KsuCliRepository.ZygiskInfo()) }
+    var zygiskModules by remember { mutableStateOf<List<KsuCliRepository.ZygiskModuleInfo>>(emptyList()) }
     var isChecking by remember { mutableStateOf(true) }
 
-    fun refreshStatus() {
+    fun refreshState() {
         scope.launch(Dispatchers.IO) {
             isChecking = true
-            isZygiskEnabled = ksuCli.isBuiltinZygiskActive()
-            activeModulesCount = ksuCli.getBuiltinZygiskModulesCount()
-            isChecking = false
+            val info = ksuCli.getZygiskInfo()
+            val modules = ksuCli.getZygiskModules()
+            val statusJson = ksuCli.getZygiskStatusJson()
+            val builtinEnabled = statusJson.contains("\"enabled\":true") || statusJson.contains("\"enabled\": true")
+            withContext(Dispatchers.Main) {
+                zygiskInfo = info
+                zygiskModules = modules
+                isBuiltinEnabled = builtinEnabled
+                isChecking = false
+            }
         }
     }
 
     LaunchedEffect(Unit) {
-        refreshStatus()
+        refreshState()
+    }
+
+    val isRunning = zygiskInfo.state == "running"
+    val engineSummary = when {
+        zygiskInfo.name.isNotEmpty() && zygiskInfo.version.isNotEmpty() -> "${zygiskInfo.name} (${zygiskInfo.version})"
+        zygiskInfo.name.isNotEmpty() -> zygiskInfo.name
+        else -> "Not Detected"
+    }
+    val statusSummary = when {
+        isChecking -> "Checking..."
+        zygiskInfo.state == "running" -> stringResource(R.string.zygisk_status_running)
+        zygiskInfo.state == "reboot" -> "Pending Reboot"
+        else -> stringResource(R.string.zygisk_status_disabled)
     }
 
     Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             LargeFlexibleTopAppBar(
                 title = { Text(stringResource(R.string.settings_zygisk_title)) },
                 navigationIcon = {
-                    IconButton(onClick = { navigator.pop() }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.TwoTone.ArrowBack,
-                            contentDescription = null,
-                        )
+                    if (showBackButton) {
+                        IconButton(onClick = { navigator.pop() }) {
+                            Icon(Icons.AutoMirrored.TwoTone.ArrowBack, contentDescription = null)
+                        }
                     }
                 },
-                scrollBehavior = scrollBehavior,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent,
                     scrolledContainerColor = Color.Transparent,
                 ),
+                scrollBehavior = scrollBehavior,
             )
         },
-        snackbarHost = {
-            SwipeableSnackbarHost(hostState = snackBarHost)
-        },
-        containerColor = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        contentWindowInsets = adaptiveScaffoldWindowInsets(includeBottom = false),
+        snackbarHost = { SwipeableSnackbarHost(hostState = snackBarHost) },
+        contentWindowInsets = adaptiveScaffoldWindowInsets(),
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(scrollBehavior.nestedScrollConnection)
-                .blurSource()
-                .padding(horizontal = 0.dp),
-            contentPadding = PaddingValues(
-                top = innerPadding.calculateTopPadding() + 5.dp,
-                bottom = innerPadding.calculateBottomPadding() + 20.dp,
-            ),
+                .padding(innerPadding)
+                .blurSource(),
+            contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp + bottomPadding),
         ) {
             item {
                 SegmentedColumn(
-                    title = "Zygisk Engine Control",
-                    content = {
-                        item {
-                            SettingsSwitchWidget(
-                                icon = Icons.TwoTone.Extension,
-                                title = stringResource(R.string.zygisk_enable_title),
-                                description = stringResource(R.string.zygisk_enable_summary),
-                                checked = isZygiskEnabled,
-                                onCheckedChange = { checked ->
-                                    isZygiskEnabled = checked
-                                    scope.launch(Dispatchers.IO) {
-                                        val ok = ksuCli.setBuiltinZygiskEnabled(checked)
-                                        snackBarHost.showReplacingSnackbar(
-                                            if (ok) {
-                                                if (checked) "Built-in Zygisk enabled" else "Built-in Zygisk disabled"
-                                            } else {
-                                                "Failed to toggle Zygisk"
-                                            },
-                                        )
-                                        refreshStatus()
-                                    }
-                                },
-                            )
-                        }
-
-                        item {
-                            SettingsSwitchWidget(
-                                icon = Icons.TwoTone.Shield,
-                                title = stringResource(R.string.zygisk_nomount_isolation),
-                                description = stringResource(R.string.zygisk_nomount_isolation_summary),
-                                checked = isNomountGuardEnabled,
-                                onCheckedChange = { checked ->
-                                    isNomountGuardEnabled = checked
-                                    scope.launch(Dispatchers.IO) {
-                                        ksuCli.syncZygiskNoMount()
-                                        snackBarHost.showReplacingSnackbar(
-                                            if (checked) "NoMount isolated guard active" else "NoMount isolated guard disabled",
-                                        )
-                                    }
-                                },
-                            )
-                        }
-
+                    title = stringResource(R.string.home_zygisk_info),
+                    modifier = Modifier.padding(bottom = 12.dp),
+                ) {
+                    item {
+                        SettingsBaseWidget(
+                            title = stringResource(R.string.home_zygisk_engine),
+                            description = engineSummary,
+                            icon = Icons.TwoTone.Security,
+                        )
+                    }
+                    item {
+                        SettingsBaseWidget(
+                            title = stringResource(R.string.home_zygisk_status),
+                            description = statusSummary,
+                            icon = Icons.TwoTone.TaskAlt,
+                        )
+                    }
+                    item {
+                        SettingsSwitchWidget(
+                            title = stringResource(R.string.zygisk_enable_title),
+                            description = stringResource(R.string.zygisk_enable_summary),
+                            icon = Icons.TwoTone.Security,
+                            checked = isBuiltinEnabled,
+                            onCheckedChange = { checked ->
+                                isBuiltinEnabled = checked
+                                scope.launch(Dispatchers.IO) {
+                                    val ok = ksuCli.setBuiltinZygiskEnabled(checked)
+                                    refreshState()
+                                    snackBarHost.showReplacingSnackbar(
+                                        if (ok) "Built-in Zygisk ${if (checked) "enabled (reboot to apply)" else "disabled"}" else "Failed to toggle Built-in Zygisk",
+                                    )
+                                }
+                            },
+                        )
+                    }
+                    if (isBuiltinEnabled) {
                         item {
                             SettingsBaseWidget(
-                                icon = Icons.TwoTone.Refresh,
                                 title = stringResource(R.string.zygisk_rearm_action),
                                 description = stringResource(R.string.zygisk_rearm_summary),
+                                icon = Icons.TwoTone.Refresh,
                                 onClick = {
                                     scope.launch(Dispatchers.IO) {
                                         val ok = ksuCli.rearmZygisk()
+                                        refreshState()
                                         snackBarHost.showReplacingSnackbar(
                                             if (ok) "Zygisk rearmed successfully" else "Failed to rearm Zygisk",
                                         )
-                                        refreshStatus()
                                     }
                                 },
                             )
                         }
-                    },
-                )
+                    }
+                }
             }
 
             item {
                 SegmentedColumn(
-                    title = "Runtime Telemetry (SukiSU Nova Reference)",
-                    content = {
+                    title = "${stringResource(R.string.home_zygisk_modules)} (${zygiskModules.size})",
+                    modifier = Modifier.padding(bottom = 12.dp),
+                ) {
+                    if (zygiskModules.isEmpty()) {
                         item {
                             SettingsBaseWidget(
-                                icon = Icons.TwoTone.TaskAlt,
-                                title = "Injection Status",
-                                description = if (isZygiskEnabled) "Active • libzygisk.so loaded into Zygote" else "Inactive",
-                            )
-                        }
-
-                        item {
-                            SettingsBaseWidget(
+                                title = "No Zygisk modules loaded",
+                                description = "Install a Zygisk module or enable Zygisk to load modules",
                                 icon = Icons.TwoTone.Extension,
-                                title = "Loaded Zygisk Modules",
-                                description = "$activeModulesCount active modules loaded by zygiskd companion",
                             )
                         }
-
-                        item {
-                            SettingsBaseWidget(
-                                icon = Icons.TwoTone.Security,
-                                title = "Stealth & Anti-Detection",
-                                description = "TracerPid cloaked via SuSFS • In-memory anonymous map protection",
-                            )
+                    } else {
+                        zygiskModules.forEach { mod ->
+                            item {
+                                val abiText = if (mod.abi.isNotEmpty()) mod.abi.joinToString("/") else "unknown"
+                                SettingsBaseWidget(
+                                    title = mod.name.ifEmpty { mod.id },
+                                    description = "${mod.version} • ABI: $abiText • ${mod.state}",
+                                    icon = Icons.TwoTone.Extension,
+                                )
+                            }
                         }
-                    },
-                )
+                    }
+                }
             }
         }
     }

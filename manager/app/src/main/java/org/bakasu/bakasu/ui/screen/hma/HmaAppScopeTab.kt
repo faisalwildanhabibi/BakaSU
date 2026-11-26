@@ -3,6 +3,8 @@ package org.bakasu.bakasu.ui.screen.hma
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,6 +37,7 @@ import org.bakasu.bakasu.data.shell.KsuCliRepository
 import org.bakasu.bakasu.domain.model.InstalledPackageInfo
 import org.bakasu.bakasu.ui.component.PackageIcon
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HmaAppScopeTab(
     config: KsuCliRepository.HmaConfig,
@@ -43,21 +46,37 @@ fun HmaAppScopeTab(
     onUpdateScope: (enabled: Boolean, scope: KsuCliRepository.HmaAppScope) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    var showUserApps by remember { mutableStateOf(true) }
     var showSystemApps by remember { mutableStateOf(false) }
-    var onlyProtected by remember { mutableStateOf(false) }
+    var onlyHidden by remember { mutableStateOf(false) }
+    var onlyAffected by remember { mutableStateOf(false) }
     var editingPkg by remember { mutableStateOf<InstalledPackageInfo?>(null) }
 
-    val filteredApps = remember(installedPackages, config.scope, query, showSystemApps, onlyProtected) {
+    val hiddenPkgSet = remember(config.templates) {
+        config.templates.values.flatMap { it.appList }.toSet()
+    }
+
+    val filteredApps = remember(
+        installedPackages,
+        config.scope,
+        hiddenPkgSet,
+        query,
+        showUserApps,
+        showSystemApps,
+        onlyHidden,
+        onlyAffected,
+    ) {
         val q = query.trim().lowercase()
         installedPackages.filter { pkg ->
             val inScope = config.scope.containsKey(pkg.packageName)
-            (!onlyProtected || inScope) &&
-                (showSystemApps || !pkg.isSystem || inScope) &&
-                (
-                    q.isEmpty() ||
-                        pkg.appLabel.lowercase().contains(q) ||
-                        pkg.packageName.lowercase().contains(q)
-                    )
+            val isHidden = hiddenPkgSet.contains(pkg.packageName)
+            val categoryMatch = (showUserApps && !pkg.isSystem) || (showSystemApps && pkg.isSystem)
+            val hiddenMatch = !onlyHidden || isHidden
+            val affectedMatch = !onlyAffected || inScope
+            val queryMatch = q.isEmpty() ||
+                pkg.appLabel.lowercase().contains(q) ||
+                pkg.packageName.lowercase().contains(q)
+            categoryMatch && hiddenMatch && affectedMatch && queryMatch
         }.sortedWith(
             compareByDescending<InstalledPackageInfo> { config.scope.containsKey(it.packageName) }
                 .thenBy { it.appLabel.lowercase() },
@@ -83,19 +102,30 @@ fun HmaAppScopeTab(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    FilterChip(
+                        selected = showUserApps,
+                        onClick = { showUserApps = !showUserApps },
+                        label = { Text("Apps") },
+                    )
                     FilterChip(
                         selected = showSystemApps,
                         onClick = { showSystemApps = !showSystemApps },
-                        label = { Text("System Apps") },
+                        label = { Text("System") },
                     )
                     FilterChip(
-                        selected = onlyProtected,
-                        onClick = { onlyProtected = !onlyProtected },
-                        label = { Text("Protected (${config.scope.size})") },
+                        selected = onlyHidden,
+                        onClick = { onlyHidden = !onlyHidden },
+                        label = { Text("Hidden (${hiddenPkgSet.size})") },
+                    )
+                    FilterChip(
+                        selected = onlyAffected,
+                        onClick = { onlyAffected = !onlyAffected },
+                        label = { Text("Affected (${config.scope.size})") },
                     )
                 }
             }

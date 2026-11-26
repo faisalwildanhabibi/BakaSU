@@ -50,15 +50,40 @@ fun HmaTemplatesTab(
         }
 
         item {
-            val templates = config.templates.values.toList()
+            val installedSet = remember(installedPackages) {
+                installedPackages.map { it.packageName }.toSet()
+            }
+            val presets = config.templates.values.filter { it.name == "baka_root_preset" }
+            val templates = config.templates.values.filter { it.name != "baka_root_preset" }
+
+            if (presets.isNotEmpty()) {
+                SegmentedColumn(
+                    title = "System Presets (${presets.size})",
+                    content = {
+                        presets.forEach { preset ->
+                            item {
+                                val mode = if (preset.isWhitelist) "Whitelist" else "Blacklist"
+                                val installedCount = preset.appList.count { it in installedSet }
+                                SettingsBaseWidget(
+                                    icon = Icons.TwoTone.ListAlt,
+                                    title = "Root & Manager Preset (${preset.name})",
+                                    description = "$mode • $installedCount installed / ${preset.appList.size} total • Auto-Synced",
+                                    onClick = { editingTemplate = preset },
+                                )
+                            }
+                        }
+                    },
+                )
+            }
+
             SegmentedColumn(
-                title = "Configured Templates (${templates.size})",
+                title = "User Templates (${templates.size})",
                 content = {
                     if (templates.isEmpty()) {
                         item {
                             SettingsBaseWidget(
                                 icon = Icons.TwoTone.ListAlt,
-                                title = "No Templates",
+                                title = "No User Templates",
                                 description = "Tap Create New Template above to add one",
                             )
                         }
@@ -66,11 +91,11 @@ fun HmaTemplatesTab(
                         templates.forEach { tpl ->
                             item {
                                 val mode = if (tpl.isWhitelist) "Whitelist" else "Blacklist"
-                                val tag = if (tpl.name == "baka_root_preset") " • Hybrid Auto-Sync" else ""
+                                val installedCount = tpl.appList.count { it in installedSet }
                                 SettingsBaseWidget(
                                     icon = Icons.TwoTone.ListAlt,
                                     title = tpl.name,
-                                    description = "$mode • ${tpl.appList.size} apps$tag",
+                                    description = "$mode • $installedCount installed / ${tpl.appList.size} total",
                                     onClick = { editingTemplate = tpl },
                                 )
                             }

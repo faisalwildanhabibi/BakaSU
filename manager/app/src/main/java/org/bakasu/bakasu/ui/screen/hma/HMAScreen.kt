@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,7 +60,10 @@ import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HMAScreen() {
+fun HMAScreen(
+    showBackButton: Boolean = true,
+    bottomPadding: Dp = 0.dp,
+) {
     val navigator = LocalNavigator.current
     val ksuCli = koinInject<KsuCliRepository>()
     val packageRepo = koinInject<InstalledPackageRepository>()
@@ -72,16 +76,19 @@ fun HMAScreen() {
     var hmaStatus by remember { mutableStateOf(KsuCliRepository.HmaStatus()) }
     var hmaConfig by remember { mutableStateOf(KsuCliRepository.HmaConfig()) }
     var hmaPathsConfig by remember { mutableStateOf(KsuCliRepository.HmaPathsConfig()) }
+    var zygiskInfo by remember { mutableStateOf(KsuCliRepository.ZygiskInfo()) }
 
     fun refreshAll() {
         scope.launch(Dispatchers.IO) {
             val status = ksuCli.getHmaStatus()
             val config = ksuCli.getHmaConfig()
             val paths = ksuCli.getHmaPathsConfig()
+            val zInfo = ksuCli.getZygiskInfo()
             withContext(Dispatchers.Main) {
                 if (status != null) hmaStatus = status
                 if (config != null) hmaConfig = config
                 if (paths != null) hmaPathsConfig = paths
+                zygiskInfo = zInfo
             }
         }
     }
@@ -111,11 +118,13 @@ fun HMAScreen() {
                 LargeFlexibleTopAppBar(
                     title = { Text(stringResource(R.string.settings_hma_title)) },
                     navigationIcon = {
-                        IconButton(onClick = { navigator.pop() }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.TwoTone.ArrowBack,
-                                contentDescription = null,
-                            )
+                        if (showBackButton) {
+                            IconButton(onClick = { navigator.pop() }) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.TwoTone.ArrowBack,
+                                    contentDescription = null,
+                                )
+                            }
                         }
                     },
                     scrollBehavior = scrollBehavior,
@@ -147,13 +156,14 @@ fun HMAScreen() {
     ) { innerPadding ->
         val listPadding = PaddingValues(
             top = innerPadding.calculateTopPadding() + 5.dp,
-            bottom = innerPadding.calculateBottomPadding() + 20.dp,
+            bottom = innerPadding.calculateBottomPadding() + 20.dp + bottomPadding,
         )
 
         when (selectedTab) {
             0 -> HmaOverviewTab(
                 hmaStatus = hmaStatus,
                 hmaConfig = hmaConfig,
+                zygiskInfo = zygiskInfo,
                 contentPadding = listPadding,
                 modifier = Modifier
                     .fillMaxSize()
@@ -290,6 +300,7 @@ fun HMAScreen() {
 private fun HmaOverviewTab(
     hmaStatus: KsuCliRepository.HmaStatus,
     hmaConfig: KsuCliRepository.HmaConfig,
+    zygiskInfo: KsuCliRepository.ZygiskInfo,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
     onToggleHma: (Boolean) -> Unit,
@@ -429,14 +440,16 @@ private fun HmaOverviewTab(
                 title = stringResource(R.string.hma_status_card_title),
                 content = {
                     item {
+                        val engineName = when {
+                            zygiskInfo.state == "running" && zygiskInfo.name.isNotEmpty() ->
+                                "${zygiskInfo.name} (${zygiskInfo.version}) • HMA ($version)"
+                            hmaStatus.installed -> "Zygisk HMA Module ($version)"
+                            else -> stringResource(R.string.hma_status_disabled)
+                        }
                         SettingsBaseWidget(
                             icon = Icons.TwoTone.Shield,
                             title = stringResource(R.string.hma_engine_status),
-                            description = if (hmaStatus.installed) {
-                                "Built-in Zygisk Module ($version)"
-                            } else {
-                                stringResource(R.string.hma_status_disabled)
-                            },
+                            description = engineName,
                         )
                     }
                     item {
@@ -457,6 +470,39 @@ private fun HmaOverviewTab(
                             icon = Icons.TwoTone.Apps,
                             title = stringResource(R.string.hma_scoped_apps_count),
                             description = "${hmaStatus.scoped_apps_count} apps active in UID seccomp • ${hmaStatus.root_granted_hidden_count} root UIDs isolated",
+                        )
+                    }
+                },
+            )
+        }
+
+        item {
+            val st = hmaConfig.settingsTemplates
+            val accessibilityCount = st["accessibility"]?.size ?: 0
+            val inputMethodCount = st["inputMethod"]?.size ?: st["ime"]?.size ?: 0
+            val devOptsCount = st["developerOptions"]?.size ?: st["development"]?.size ?: 0
+            SegmentedColumn(
+                title = "System Settings Templates",
+                content = {
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.TwoTone.Security,
+                            title = "Accessibility Services",
+                            description = if (accessibilityCount > 0) "$accessibilityCount services hidden" else "No services hidden (configured via HMA)",
+                        )
+                    }
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.TwoTone.Security,
+                            title = "Input Methods (IME)",
+                            description = if (inputMethodCount > 0) "$inputMethodCount input methods hidden" else "No input methods hidden",
+                        )
+                    }
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.TwoTone.Security,
+                            title = "Developer Options",
+                            description = if (devOptsCount > 0) "$devOptsCount developer settings rules active" else "Standard developer options visibility",
                         )
                     }
                 },

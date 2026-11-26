@@ -714,20 +714,82 @@ class KsuCliRepository(context: Context) {
         return "None"
     }
 
+    data class ZygiskInfo(
+        val id: String = "",
+        val name: String = "",
+        val state: String = "disabled",
+        val version: String = "",
+    )
+
+    data class ZygiskModuleInfo(
+        val id: String,
+        val name: String,
+        val version: String,
+        val kind: String = "zygisk",
+        val abi: List<String> = emptyList(),
+        val state: String = "unknown",
+    )
+
+    fun getZygiskInfo(): ZygiskInfo = runCatching {
+        val out = ShellUtils.fastCmd(getRootShell(), "${getKsuDaemonPath()} zygisk info").trim()
+        if (out.startsWith("{")) {
+            val json = JSONObject(out)
+            ZygiskInfo(
+                id = json.optString("id", ""),
+                name = json.optString("name", ""),
+                state = json.optString("state", "disabled"),
+                version = json.optString("version", ""),
+            )
+        } else {
+            ZygiskInfo()
+        }
+    }.getOrDefault(ZygiskInfo())
+
+    fun getZygiskModules(): List<ZygiskModuleInfo> = runCatching {
+        val out = ShellUtils.fastCmd(getRootShell(), "${getKsuDaemonPath()} zygisk modules").trim()
+        if (!out.startsWith("[")) return emptyList()
+        val arr = JSONArray(out)
+        buildList {
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val abis = mutableListOf<String>()
+                val abiArr = obj.optJSONArray("abi")
+                if (abiArr != null) {
+                    for (j in 0 until abiArr.length()) {
+                        abiArr.optString(j).takeIf { it.isNotEmpty() }?.let { abis.add(it) }
+                    }
+                }
+                add(
+                    ZygiskModuleInfo(
+                        id = obj.optString("id", ""),
+                        name = obj.optString("name", ""),
+                        version = obj.optString("version", ""),
+                        kind = obj.optString("kind", "zygisk"),
+                        abi = abis,
+                        state = obj.optString("state", "unknown"),
+                    ),
+                )
+            }
+        }
+    }.getOrDefault(emptyList())
+
     fun getZygiskStatusJson(): String = runCatching {
         val shell = getRootShell()
         ShellUtils.fastCmd(shell, "${getKsuDaemonPath()} zygisk status")
     }.getOrDefault("")
 
     fun isBuiltinZygiskActive(): Boolean {
+        val info = getZygiskInfo()
+        if (info.state == "running") return true
         val out = getZygiskStatusJson()
-        return out.contains("\"running\": true") || out.contains("\"running\":true") || SuFile.open("/dev/socket/zygiskd").exists()
+        return out.contains("\"running\": true") ||
+            out.contains("\"running\":true") ||
+            out.contains("\"zygote_injected\":true") ||
+            out.contains("\"zygote_injected\": true") ||
+            SuFile.open("/dev/socket/zygiskd").exists()
     }
 
-    fun getBuiltinZygiskModulesCount(): Int = runCatching {
-        val out = getZygiskStatusJson()
-        if (out.isNotEmpty()) JSONObject(out).optInt("module_count", 0) else 0
-    }.getOrDefault(0)
+    fun getBuiltinZygiskModulesCount(): Int = getZygiskModules().size
 
     fun setBuiltinZygiskEnabled(enable: Boolean): Boolean = execKsud(if (enable) "zygisk on" else "zygisk off")
 
@@ -740,6 +802,16 @@ class KsuCliRepository(context: Context) {
         ShellUtils.fastCmd(shell, "${getKsuDaemonPath()} tuning status")
     }.getOrDefault("")
 
+    fun getKTuneStatus(): Map<String, String> = runCatching {
+        getKTuneStatusJson().lineSequence()
+            .map { it.trim() }
+            .filter { it.contains('=') }
+            .associate {
+                val idx = it.indexOf('=')
+                it.substring(0, idx).trim() to it.substring(idx + 1).trim()
+            }
+    }.getOrDefault(emptyMap())
+
     fun setKTuneThermal(index: Int): Boolean = execKsud("tuning thermal $index")
 
     fun setKTuneBypass(enabled: Boolean): Boolean = execKsud("tuning bypass ${if (enabled) 1 else 0}")
@@ -748,7 +820,23 @@ class KsuCliRepository(context: Context) {
 
     fun setKTuneChargeLimitToggle(enabled: Boolean): Boolean = execKsud("tuning charge-limit-toggle ${if (enabled) 1 else 0}")
 
+    fun setKTuneChargeCurrent(ua: Long): Boolean = execKsud("tuning charge-current $ua")
+
+    fun setKTuneTcpCongestion(algo: String): Boolean = execKsud("tuning tcp-congestion $algo")
+
+    fun setKTuneQdisc(qdisc: String): Boolean = execKsud("tuning qdisc $qdisc")
+
     fun setKTuneSwappiness(value: Int): Boolean = execKsud("tuning swappiness $value")
+
+    fun setKTuneVfsCache(value: Int): Boolean = execKsud("tuning vfs-cache $value")
+
+    fun setKTuneKcompressd(value: Int): Boolean = execKsud("tuning kcompressd $value")
+
+    fun setKTuneZramSize(mb: Int): Boolean = execKsud("tuning zram-size $mb")
+
+    fun setKTuneZramAlgorithm(algo: String): Boolean = execKsud("tuning zram-algorithm $algo")
+
+    fun setKTunePersist(enabled: Boolean): Boolean = execKsud("tuning persist ${if (enabled) 1 else 0}")
 
     fun addKernelUmountPath(path: String, flags: Int): Boolean {
         val shell = getRootShell()
@@ -873,6 +961,7 @@ class KsuCliRepository(context: Context) {
         val detailLog: Boolean = false,
         val errorOnlyLog: Boolean = false,
         val templates: Map<String, HmaTemplate> = emptyMap(),
+        val settingsTemplates: Map<String, List<String>> = emptyMap(),
         val scope: Map<String, HmaAppScope> = emptyMap(),
         val ignoredPackages: Set<String> = emptySet(),
     )
@@ -947,6 +1036,21 @@ class KsuCliRepository(context: Context) {
                 }
             }
 
+            val settingsTemplatesMap = linkedMapOf<String, List<String>>()
+            val stObj = json.optJSONObject("settingsTemplates")
+            if (stObj != null) {
+                val keys = stObj.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val arr = stObj.optJSONArray(key) ?: continue
+                    val items = mutableListOf<String>()
+                    for (i in 0 until arr.length()) {
+                        arr.optString(i).takeIf { it.isNotEmpty() }?.let { items.add(it) }
+                    }
+                    settingsTemplatesMap[key] = items
+                }
+            }
+
             HmaConfig(
                 uidFilterEnabled = json.optBoolean("uidFilterEnabled", true),
                 forceMountData = json.optBoolean("forceMountData", true),
@@ -957,6 +1061,7 @@ class KsuCliRepository(context: Context) {
                 detailLog = json.optBoolean("detailLog", false),
                 errorOnlyLog = json.optBoolean("errorOnlyLog", false),
                 templates = templatesMap,
+                settingsTemplates = settingsTemplatesMap,
                 scope = scopeMap,
                 ignoredPackages = ignored,
             )
