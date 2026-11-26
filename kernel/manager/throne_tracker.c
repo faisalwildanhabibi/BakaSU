@@ -261,13 +261,8 @@ struct track_throne_struct {
 
 static DEFINE_MUTEX(throne_tracker_mutex);
 
-void do_track_throne(void *data)
+static void do_track_throne_flags(unsigned int flags)
 {
-    struct track_throne_struct *tts = (struct track_throne_struct *)data;
-    unsigned int flags = tts ? tts->flags : 0;
-    if (tts)
-        kfree(tts);
-
     if (mutex_lock_interruptible(&throne_tracker_mutex))
         return;
 
@@ -380,23 +375,25 @@ out:
     mutex_unlock(&throne_tracker_mutex);
 }
 
+void do_track_throne(void *data)
+{
+    struct track_throne_struct *tts = (struct track_throne_struct *)data;
+    unsigned int flags = tts ? tts->flags : 0;
+    if (tts)
+        kfree(tts);
+    do_track_throne_flags(flags);
+}
+
 static void ksu_throne_work_func(struct work_struct *work)
 {
-    struct track_throne_struct tts = {
-        .flags = TRACK_THRONE_FROM_RENAMEAT,
-    };
-    do_track_throne(&tts);
+    do_track_throne_flags(TRACK_THRONE_FROM_RENAMEAT);
 }
 static DECLARE_WORK(ksu_throne_work, ksu_throne_work_func);
 
 void track_throne(unsigned int flags)
 {
     if (flags & TRACK_THRONE_FORCE_SYNCHRONOUS) {
-        struct track_throne_struct *tts = kzalloc(sizeof(struct track_throne_struct), GFP_KERNEL);
-        if (!tts)
-            return;
-        tts->flags = flags;
-        do_track_throne(tts);
+        do_track_throne_flags(flags);
     } else {
         schedule_work(&ksu_throne_work);
     }
