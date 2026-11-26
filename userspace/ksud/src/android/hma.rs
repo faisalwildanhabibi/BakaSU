@@ -551,9 +551,7 @@ fn sync_targeted_paths(
     let templates_map = config_obj.get("templates").and_then(Value::as_object);
     let mut desired_rules: HashSet<(u32, String)> = HashSet::new();
 
-    if enabled
-        && let Some(scope_map) = config_obj.get("scope").and_then(Value::as_object)
-    {
+    if enabled && let Some(scope_map) = config_obj.get("scope").and_then(Value::as_object) {
         let data_app_dirs = if paths_cfg.auto_hide_app_paths {
             collect_data_app_dirs()
         } else {

@@ -1039,6 +1039,5 @@ class KsuCliRepository(context: Context) {
 
     fun setHmaGlobalPaths(paths: List<String>): Boolean = execKsud("hma paths set-global ${shellQuote(paths.joinToString(","))}", true)
 
-    fun setHmaAppPaths(packageName: String, paths: List<String>): Boolean =
-        execKsud("hma paths set-app ${shellQuote(packageName)} ${shellQuote(paths.joinToString(","))}", true)
+    fun setHmaAppPaths(packageName: String, paths: List<String>): Boolean = execKsud("hma paths set-app ${shellQuote(packageName)} ${shellQuote(paths.joinToString(","))}", true)
 }
