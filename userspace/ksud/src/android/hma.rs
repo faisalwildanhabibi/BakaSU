@@ -80,12 +80,6 @@ pub fn disable() -> Result<()> {
         let disable_file = dir.join(DISABLE_FILE_NAME);
         ensure_file_exists(&disable_file)?;
     }
-    if let Ok(hma_dir) = find_or_create_active_hma_dir() {
-        let active_path = hma_dir.join("uid_scope/active");
-        if active_path.exists() {
-            let _ = fs::remove_file(active_path);
-        }
-    }
     info!("Built-in HMA OSS + UID has been disabled");
     Ok(())
 }
