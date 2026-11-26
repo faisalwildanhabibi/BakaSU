@@ -807,7 +807,7 @@ class KsuCliRepository(context: Context) {
     }
 
     data class HmaStatus(
-        val enabled: Boolean = true,
+        val enabled: Boolean = false,
         val installed: Boolean = false,
         val version: String = "",
         val uid_filter_active: Boolean = false,
@@ -823,7 +823,7 @@ class KsuCliRepository(context: Context) {
         return try {
             val json = org.json.JSONObject(out)
             HmaStatus(
-                enabled = json.optBoolean("enabled", true),
+                enabled = json.optBoolean("enabled", false),
                 installed = json.optBoolean("installed", false),
                 version = json.optString("version", "177-UID3.1"),
                 uid_filter_active = json.optBoolean("uid_filter_active", false),

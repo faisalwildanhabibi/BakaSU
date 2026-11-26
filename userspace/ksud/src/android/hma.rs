@@ -47,11 +47,12 @@ pub fn is_installed() -> bool {
     dir.is_dir() && dir.join("zygisk/arm64-v8a.so").exists()
 }
 
-/// HMA is enabled by default unless explicitly disabled by the user
+/// HMA is disabled by default unless explicitly enabled by the user
 pub fn is_enabled() -> bool {
+    let enable_flag = Path::new(BUILTIN_HMA_FLAG);
     let disable_flag = Path::new(DISABLE_HMA_FLAG);
     let disable_file = Path::new(BUILTIN_HMA_DIR).join(DISABLE_FILE_NAME);
-    !disable_flag.exists() && !disable_file.exists()
+    enable_flag.exists() && !disable_flag.exists() && !disable_file.exists()
 }
 
 pub fn enable() -> Result<()> {
@@ -78,6 +79,12 @@ pub fn disable() -> Result<()> {
     if dir.exists() {
         let disable_file = dir.join(DISABLE_FILE_NAME);
         ensure_file_exists(&disable_file)?;
+    }
+    if let Ok(hma_dir) = find_or_create_active_hma_dir() {
+        let active_path = hma_dir.join("uid_scope/active");
+        if active_path.exists() {
+            let _ = fs::remove_file(active_path);
+        }
     }
     info!("Built-in HMA OSS + UID has been disabled");
     Ok(())

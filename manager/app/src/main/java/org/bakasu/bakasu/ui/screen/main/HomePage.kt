@@ -847,7 +847,7 @@ private fun InfoCard(
                     Spacer(Modifier.width(8.dp))
                     LabelText(
                         label = if (isZygiskRunning) stringResource(R.string.zygisk_status_running) else stringResource(R.string.zygisk_status_disabled),
-                        containerColor = if (isZygiskRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        containerColor = if (isZygiskRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                     )
                 },
             )
