@@ -443,7 +443,9 @@ private fun HmaOverviewTab(
                         val engineName = when {
                             zygiskInfo.state == "running" && zygiskInfo.name.isNotEmpty() ->
                                 "${zygiskInfo.name} (${zygiskInfo.version}) • HMA ($version)"
+
                             hmaStatus.installed -> "Zygisk HMA Module ($version)"
+
                             else -> stringResource(R.string.hma_status_disabled)
                         }
                         SettingsBaseWidget(
