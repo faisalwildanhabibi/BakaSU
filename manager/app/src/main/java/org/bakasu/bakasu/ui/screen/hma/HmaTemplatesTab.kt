@@ -50,11 +50,23 @@ fun HmaTemplatesTab(
         }
 
         item {
+            val officialPresetNames = remember {
+                setOf(
+                    "baka_root_preset",
+                    "root_apps",
+                    "detector_apps",
+                    "sus_apps",
+                    "custom_rom",
+                    "shizuku_dhizuku",
+                    "xposed",
+                    "accessibility",
+                )
+            }
             val installedSet = remember(installedPackages) {
                 installedPackages.map { it.packageName }.toSet()
             }
-            val presets = config.templates.values.filter { it.name == "baka_root_preset" }
-            val templates = config.templates.values.filter { it.name != "baka_root_preset" }
+            val presets = config.templates.values.filter { it.name in officialPresetNames }
+            val templates = config.templates.values.filter { it.name !in officialPresetNames }
 
             if (presets.isNotEmpty()) {
                 SegmentedColumn(
@@ -64,9 +76,14 @@ fun HmaTemplatesTab(
                             item {
                                 val mode = if (preset.isWhitelist) "Whitelist" else "Blacklist"
                                 val installedCount = preset.appList.count { it in installedSet }
+                                val label = if (preset.name == "baka_root_preset") {
+                                    "Dual-World Root Preset (${preset.name})"
+                                } else {
+                                    "Official Preset (${preset.name})"
+                                }
                                 SettingsBaseWidget(
                                     icon = Icons.TwoTone.ListAlt,
-                                    title = "Root & Manager Preset (${preset.name})",
+                                    title = label,
                                     description = "$mode • $installedCount installed / ${preset.appList.size} total • Auto-Synced",
                                     onClick = { editingTemplate = preset },
                                 )

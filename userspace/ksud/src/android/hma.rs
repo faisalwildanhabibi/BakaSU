@@ -836,6 +836,152 @@ pub fn sync_uid_scope() -> Result<usize> {
         "appList": hidden_packages_vec
     });
 
+    // Populate official HMA-OSS app presets from installed packages
+    let mut root_apps_list: Vec<String> = Vec::new();
+    let mut detector_apps_list: Vec<String> = Vec::new();
+    let mut sus_apps_list: Vec<String> = Vec::new();
+    let mut custom_rom_list: Vec<String> = Vec::new();
+    let mut shizuku_list: Vec<String> = Vec::new();
+    let mut xposed_list: Vec<String> = Vec::new();
+
+    const DETECTOR_EXACT: &[&str] = &[
+        "com.reveny.nativecheck",
+        "icu.nullptr.nativetest",
+        "io.github.rabehx.securify",
+        "com.zhenxi.hunter",
+        "io.github.vvb2060.mahoshojo",
+        "io.github.huskydg.memorydetector",
+        "org.akanework.checker",
+        "icu.nullptr.applistdetector",
+        "com.byxiaorun.detector",
+        "com.anycheck.app",
+        "com.joeykrim.rootcheck",
+        "krypton.tbsafetychecker",
+        "gr.nikolasspyr.integritycheck",
+        "com.henrikherzig.playintegritychecker",
+    ];
+    const SUS_EXACT: &[&str] = &[
+        "com.reveny.vbmetafix.service",
+        "berserker.android.apps.sshdroid",
+        "com.iamaner.oneclickfreeze",
+        "com.shamanland.privatescreenshots",
+        "org.connectbot",
+        "com.anydesk.anydeskandroid",
+        "com.speedsoftware.rootexplorer",
+        "me.zhanghai.android.files",
+        "com.lonelycatgames.Xplore",
+        "org.fossify.filemanager",
+        "com.amaze.filemanager",
+    ];
+
+    for (pkg, uid) in &all_packages {
+        if root_granted_uids.contains(uid) || PRESET_HIDDEN_PACKAGES.contains(&pkg.as_str()) {
+            root_apps_list.push(pkg.clone());
+        }
+        if DETECTOR_EXACT.contains(&pkg.as_str())
+            || pkg.starts_with("me.garfieldhan.")
+            || pkg.contains("chunqiu")
+        {
+            detector_apps_list.push(pkg.clone());
+        }
+        if SUS_EXACT.contains(&pkg.as_str())
+            || pkg.starts_with("com.offsec.")
+            || pkg.starts_with("com.termux")
+            || pkg.starts_with("com.realvnc.")
+            || pkg.starts_with("nextapp.fx")
+        {
+            sus_apps_list.push(pkg.clone());
+        }
+        if pkg.starts_with("lineageos.")
+            || pkg.starts_with("org.lineageos.")
+            || pkg.starts_with("com.caf.")
+            || pkg.starts_with("org.calyxos.")
+            || pkg.starts_with("co.aospa.")
+            || pkg.starts_with("org.omnirom.")
+            || pkg.starts_with("org.protonaosp.")
+            || pkg.starts_with("org.evolution.")
+            || pkg.starts_with("org.evolutionx.")
+        {
+            custom_rom_list.push(pkg.clone());
+        }
+        if pkg == "com.rosan.dhizuku" || pkg.starts_with("moe.shizuku.") {
+            shizuku_list.push(pkg.clone());
+        }
+        if pkg == "org.frknkrc44.hma_oss" || pkg.contains("lsposed") || pkg.contains("xposed") {
+            xposed_list.push(pkg.clone());
+        }
+    }
+    for list in [
+        &mut root_apps_list,
+        &mut detector_apps_list,
+        &mut sus_apps_list,
+        &mut custom_rom_list,
+        &mut shizuku_list,
+        &mut xposed_list,
+    ] {
+        list.sort();
+    }
+    for (preset_name, list) in [
+        ("root_apps", root_apps_list),
+        ("detector_apps", detector_apps_list),
+        ("sus_apps", sus_apps_list),
+        ("custom_rom", custom_rom_list),
+        ("shizuku_dhizuku", shizuku_list),
+        ("xposed", xposed_list),
+    ] {
+        if !list.is_empty() {
+            config_obj["templates"][preset_name] = serde_json::json!({
+                "isWhitelist": false,
+                "appList": list
+            });
+        }
+    }
+
+    // Populate official HMA-OSS settingsTemplates (Accessibility, Input Method, Dev Options)
+    if config_obj
+        .get("settingsTemplates")
+        .and_then(Value::as_object)
+        .is_none()
+    {
+        config_obj["settingsTemplates"] = serde_json::json!({});
+    }
+    if let Some(st_obj) = config_obj
+        .get_mut("settingsTemplates")
+        .and_then(Value::as_object_mut)
+    {
+        st_obj.entry("accessibility").or_insert_with(|| {
+            serde_json::json!({
+                "settingsList": [
+                    { "name": "accessibility_enabled", "value": "0", "database": "secure" },
+                    { "name": "enabled_accessibility_services", "value": "", "database": "secure" }
+                ]
+            })
+        });
+        st_obj.entry("input_method").or_insert_with(|| {
+            serde_json::json!({
+                "settingsList": [
+                    {
+                        "name": "default_input_method",
+                        "value": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+                        "database": "secure"
+                    },
+                    { "name": "tts_default_synth", "value": "com.google.android.tts", "database": "secure" }
+                ]
+            })
+        });
+        st_obj.entry("dev_options").or_insert_with(|| {
+            serde_json::json!({
+                "settingsList": [
+                    { "name": "adb_enabled", "value": "0", "database": "global" },
+                    { "name": "adb_wifi_enabled", "value": "0", "database": "global" },
+                    { "name": "development_settings_enabled", "value": "0", "database": "global" },
+                    { "name": "hidden_api_policy", "value": null, "database": "global" },
+                    { "name": "allow_mock_location", "value": "0", "database": "secure" }
+                ]
+            })
+        });
+    }
+
     let ignored: HashSet<String> = config_obj
         .get("ignoredPackagesForPresets")
         .and_then(Value::as_array)

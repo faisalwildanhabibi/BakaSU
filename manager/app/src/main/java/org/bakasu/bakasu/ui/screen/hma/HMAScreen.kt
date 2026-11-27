@@ -481,30 +481,30 @@ private fun HmaOverviewTab(
         item {
             val st = hmaConfig.settingsTemplates
             val accessibilityCount = st["accessibility"]?.size ?: 0
-            val inputMethodCount = st["inputMethod"]?.size ?: st["ime"]?.size ?: 0
-            val devOptsCount = st["developerOptions"]?.size ?: st["development"]?.size ?: 0
+            val inputMethodCount = st["input_method"]?.size ?: st["inputMethod"]?.size ?: st["ime"]?.size ?: 0
+            val devOptsCount = st["dev_options"]?.size ?: st["developerOptions"]?.size ?: st["development"]?.size ?: 0
             SegmentedColumn(
-                title = "System Settings Templates",
+                title = "System Settings Presets",
                 content = {
                     item {
                         SettingsBaseWidget(
                             icon = Icons.TwoTone.Security,
                             title = "Accessibility Services",
-                            description = if (accessibilityCount > 0) "$accessibilityCount services hidden" else "No services hidden (configured via HMA)",
+                            description = if (accessibilityCount > 0) "$accessibilityCount rules active (accessibility_enabled, services)" else "Not configured",
                         )
                     }
                     item {
                         SettingsBaseWidget(
                             icon = Icons.TwoTone.Security,
                             title = "Input Methods (IME)",
-                            description = if (inputMethodCount > 0) "$inputMethodCount input methods hidden" else "No input methods hidden",
+                            description = if (inputMethodCount > 0) "$inputMethodCount rules active (default_input_method, tts_default_synth)" else "Not configured",
                         )
                     }
                     item {
                         SettingsBaseWidget(
                             icon = Icons.TwoTone.Security,
                             title = "Developer Options",
-                            description = if (devOptsCount > 0) "$devOptsCount developer settings rules active" else "Standard developer options visibility",
+                            description = if (devOptsCount > 0) "$devOptsCount rules active (adb, dev_settings, mock_location, hidden_api)" else "Not configured",
                         )
                     }
                 },
