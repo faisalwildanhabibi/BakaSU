@@ -817,7 +817,10 @@ pub fn sync_uid_scope() -> Result<usize> {
     {
         config_obj["templates"] = serde_json::json!({});
     }
-    if let Some(tpl_obj) = config_obj.get_mut("templates").and_then(Value::as_object_mut) {
+    if let Some(tpl_obj) = config_obj
+        .get_mut("templates")
+        .and_then(Value::as_object_mut)
+    {
         tpl_obj.remove("baka_root_preset");
     }
 
@@ -966,17 +969,6 @@ pub fn sync_uid_scope() -> Result<usize> {
             })
         });
     }
-
-    let ignored: HashSet<String> = config_obj
-        .get("ignoredPackagesForPresets")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
 
     const LAUNCHER_AND_SYSTEM_UI_EXCLUDES: &[&str] = &[
         "com.google.android.apps.nexuslauncher",
