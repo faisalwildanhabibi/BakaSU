@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.twotone.Add
 import androidx.compose.material.icons.twotone.ListAlt
+import androidx.compose.material.icons.twotone.Refresh
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,6 +26,7 @@ fun HmaTemplatesTab(
     contentPadding: PaddingValues,
     onSaveTemplate: (name: String, isWhitelist: Boolean, apps: List<String>) -> Unit,
     onDeleteTemplate: (name: String) -> Unit,
+    onReloadPresets: () -> Unit,
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var editingTemplate by remember { mutableStateOf<KsuCliRepository.HmaTemplate?>(null) }
@@ -45,6 +47,14 @@ fun HmaTemplatesTab(
                             onClick = { showCreateDialog = true },
                         )
                     }
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.TwoTone.Refresh,
+                            title = "Reload Presets",
+                            description = "Rescan installed packages and refresh official HMA presets",
+                            onClick = { onReloadPresets() },
+                        )
+                    }
                 },
             )
         }
@@ -52,7 +62,6 @@ fun HmaTemplatesTab(
         item {
             val officialPresetNames = remember {
                 setOf(
-                    "baka_root_preset",
                     "root_apps",
                     "detector_apps",
                     "sus_apps",
@@ -70,20 +79,15 @@ fun HmaTemplatesTab(
 
             if (presets.isNotEmpty()) {
                 SegmentedColumn(
-                    title = "System Presets (${presets.size})",
+                    title = "Official Presets (${presets.size})",
                     content = {
                         presets.forEach { preset ->
                             item {
                                 val mode = if (preset.isWhitelist) "Whitelist" else "Blacklist"
                                 val installedCount = preset.appList.count { it in installedSet }
-                                val label = if (preset.name == "baka_root_preset") {
-                                    "Dual-World Root Preset (${preset.name})"
-                                } else {
-                                    "Official Preset (${preset.name})"
-                                }
                                 SettingsBaseWidget(
                                     icon = Icons.TwoTone.ListAlt,
-                                    title = label,
+                                    title = "Official Preset (${preset.name})",
                                     description = "$mode • $installedCount installed / ${preset.appList.size} total • Auto-Synced",
                                     onClick = { editingTemplate = preset },
                                 )

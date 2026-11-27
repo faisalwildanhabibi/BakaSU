@@ -257,6 +257,15 @@ fun HMAScreen(
                         refreshAll()
                     }
                 },
+                onReloadPresets = {
+                    scope.launch(Dispatchers.IO) {
+                        val ok = ksuCli.syncHmaUidRules()
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) "Official HMA presets reloaded" else "Failed to reload presets",
+                        )
+                        refreshAll()
+                    }
+                },
             )
 
             3 -> HmaPathsTab(

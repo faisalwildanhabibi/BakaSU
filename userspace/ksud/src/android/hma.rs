@@ -777,15 +777,9 @@ pub fn sync_uid_scope() -> Result<usize> {
     ensure_dir_exists(&uid_scope_dir)?;
 
     let root_granted_uids = get_root_granted_uids();
-    let mut hidden_packages: HashSet<String> = HashSet::new();
-
-    for pkg in PRESET_HIDDEN_PACKAGES {
-        hidden_packages.insert((*pkg).to_string());
-    }
 
     let mut all_packages: HashMap<String, u32> = HashMap::new();
     let mut system_packages: HashSet<String> = HashSet::new();
-    let mut user_non_root_apps: Vec<(String, u32)> = Vec::new();
 
     let packages_list_path = Path::new("/data/system/packages.list");
     if let Ok(file) = File::open(packages_list_path) {
@@ -809,23 +803,12 @@ pub fn sync_uid_scope() -> Result<usize> {
                     if is_system_pkg {
                         system_packages.insert(pkg_name.to_string());
                     }
-
-                    let is_root_granted = root_granted_uids.contains(&uid);
-                    let is_preset_hidden = PRESET_HIDDEN_PACKAGES.contains(&pkg_name);
-
-                    if is_root_granted || is_preset_hidden {
-                        hidden_packages.insert(pkg_name.to_string());
-                    } else if !is_system_pkg {
-                        user_non_root_apps.push((pkg_name.to_string(), uid));
-                    }
                 }
             }
         }
     }
 
     let mut config_obj = read_or_init_config(&hma_dir);
-    let mut hidden_packages_vec: Vec<String> = hidden_packages.into_iter().collect();
-    hidden_packages_vec.sort();
 
     if config_obj
         .get("templates")
@@ -834,10 +817,9 @@ pub fn sync_uid_scope() -> Result<usize> {
     {
         config_obj["templates"] = serde_json::json!({});
     }
-    config_obj["templates"]["baka_root_preset"] = serde_json::json!({
-        "isWhitelist": false,
-        "appList": hidden_packages_vec
-    });
+    if let Some(tpl_obj) = config_obj.get_mut("templates").and_then(Value::as_object_mut) {
+        tpl_obj.remove("baka_root_preset");
+    }
 
     // Populate official HMA-OSS app presets from installed packages
     let mut root_apps_list: Vec<String> = Vec::new();
@@ -1009,27 +991,49 @@ pub fn sync_uid_scope() -> Result<usize> {
         config_obj["scope"] = serde_json::json!({});
     }
     if let Some(scope) = config_obj.get_mut("scope").and_then(Value::as_object_mut) {
-        scope.retain(|pkg, _| {
+        scope.retain(|pkg, app_cfg| {
             let uid = all_packages.get(pkg).copied().unwrap_or(0);
-            !system_packages.contains(pkg)
-                && !root_granted_uids.contains(&uid)
-                && !PRESET_HIDDEN_PACKAGES.contains(&pkg.as_str())
-                && !LAUNCHER_AND_SYSTEM_UI_EXCLUDES.contains(&pkg.as_str())
-        });
-        for (pkg, _uid) in &user_non_root_apps {
-            if !scope.contains_key(pkg)
-                && !ignored.contains(pkg)
-                && !LAUNCHER_AND_SYSTEM_UI_EXCLUDES.contains(&pkg.as_str())
+            if system_packages.contains(pkg)
+                || root_granted_uids.contains(&uid)
+                || PRESET_HIDDEN_PACKAGES.contains(&pkg.as_str())
+                || LAUNCHER_AND_SYSTEM_UI_EXCLUDES.contains(&pkg.as_str())
             {
-                scope.insert(
-                    pkg.clone(),
-                    serde_json::json!({
-                        "useWhitelist": false,
-                        "applyTemplates": ["baka_root_preset"]
-                    }),
-                );
+                return false;
             }
-        }
+            if let Some(obj) = app_cfg.as_object_mut()
+                && let Some(arr) = obj.get_mut("applyTemplates").and_then(Value::as_array_mut)
+            {
+                let before = arr.len();
+                arr.retain(|v| v.as_str() != Some("baka_root_preset"));
+                if arr.len() < before {
+                    let has_other_rules = !arr.is_empty()
+                        || obj
+                            .get("applyPresets")
+                            .and_then(Value::as_array)
+                            .is_some_and(|a| !a.is_empty())
+                        || obj
+                            .get("extraAppList")
+                            .and_then(Value::as_array)
+                            .is_some_and(|a| !a.is_empty())
+                        || obj
+                            .get("extraOppositeAppList")
+                            .and_then(Value::as_array)
+                            .is_some_and(|a| !a.is_empty())
+                        || obj
+                            .get("applySettingTemplates")
+                            .and_then(Value::as_array)
+                            .is_some_and(|a| !a.is_empty())
+                        || obj
+                            .get("applySettingsPresets")
+                            .and_then(Value::as_array)
+                            .is_some_and(|a| !a.is_empty());
+                    if !has_other_rules {
+                        return false;
+                    }
+                }
+            }
+            true
+        });
     }
 
     let _ = write_config(&hma_dir, &config_obj);

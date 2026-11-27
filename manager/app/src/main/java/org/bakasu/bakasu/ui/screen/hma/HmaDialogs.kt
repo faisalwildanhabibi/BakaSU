@@ -185,7 +185,15 @@ fun HmaTemplateEditorDialog(
     var showAppPicker by remember { mutableStateOf(false) }
 
     val isNew = existingTemplate == null
-    val isPreset = existingTemplate?.name == "baka_root_preset"
+    val isPreset = existingTemplate?.name in setOf(
+        "root_apps",
+        "detector_apps",
+        "sus_apps",
+        "custom_rom",
+        "shizuku_dhizuku",
+        "xposed",
+        "accessibility",
+    )
     val installedSet = remember(installedPackages) { installedPackages.map { it.packageName }.toSet() }
     val installedCount = appList.count { it in installedSet }
 
@@ -309,7 +317,7 @@ fun HmaScopeEditorDialog(
     var invertActivityLaunchProtection by remember { mutableStateOf(initialScope?.invertActivityLaunchProtection ?: false) }
     val appliedTemplates = remember {
         mutableStateListOf<String>().apply {
-            addAll(initialScope?.applyTemplates ?: listOf("baka_root_preset"))
+            addAll(initialScope?.applyTemplates ?: emptyList())
         }
     }
     var extraAppList by remember { mutableStateOf(initialScope?.extraAppList ?: emptyList()) }
