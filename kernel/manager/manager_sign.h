@@ -21,6 +21,10 @@
 #define EXPECTED_SIZE_SUKISU 0x35c
 #define EXPECTED_HASH_SUKISU "947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef"
 
+// faisalwildanhabibi/BakaSU (customSU)
+#define EXPECTED_SIZE_CUSTOM 0x02df
+#define EXPECTED_HASH_CUSTOM "d08d52d19bc5d325cda5e91fdd352097d55bc598fd78ed839df9e537389921c7"
+
 typedef struct {
     unsigned size;
     const char *sha256;
