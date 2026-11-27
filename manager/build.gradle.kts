@@ -59,7 +59,7 @@ fun getGitCommitCount(): Int = providers.exec {
 
 fun getGitDescribe(): String {
     val desc = providers.exec {
-        commandLine("git", "describe", "--tags", "--always", "--abbrev=0")
+        commandLine("git", "describe", "--tags", "--match", "v[0-9]*", "--always", "--abbrev=0")
     }.standardOutput.asText.get().trim()
     if (isSpoofedBuild) {
         return "$desc-spoofed"

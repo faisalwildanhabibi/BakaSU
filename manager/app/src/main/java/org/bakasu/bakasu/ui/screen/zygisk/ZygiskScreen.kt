@@ -40,6 +40,7 @@ import org.bakasu.bakasu.data.shell.KsuCliRepository
 import org.bakasu.bakasu.ui.component.SwipeableSnackbarHost
 import org.bakasu.bakasu.ui.component.settings.SegmentedColumn
 import org.bakasu.bakasu.ui.component.settings.SettingsBaseWidget
+import org.bakasu.bakasu.ui.component.settings.SettingsChooseWidget
 import org.bakasu.bakasu.ui.component.settings.SettingsSwitchWidget
 import org.bakasu.bakasu.ui.navigation.LocalNavigator
 import org.bakasu.bakasu.ui.theme.blurSource
@@ -65,6 +66,8 @@ fun ZygiskScreen(
     var zygiskModules by remember { mutableStateOf<List<KsuCliRepository.ZygiskModuleInfo>>(emptyList()) }
     var customLinker by remember { mutableStateOf(false) }
     var anonymousMemory by remember { mutableStateOf(false) }
+    var pltEngineIndex by remember { mutableStateOf(0) }
+    val pltEngines = remember { listOf("yukiplt", "bytehook", "lsplt") }
     var isChecking by remember { mutableStateOf(true) }
 
     fun refreshState() {
@@ -73,14 +76,16 @@ fun ZygiskScreen(
             val info = ksuCli.getZygiskInfo()
             val modules = ksuCli.getZygiskModules()
             val statusJson = ksuCli.getZygiskStatusJson()
-            val configMap = ksuCli.getZygiskConfig()
+            val rawConfig = ksuCli.getZygiskConfigRaw()
             val builtinEnabled = statusJson.contains("\"enabled\":true") || statusJson.contains("\"enabled\": true")
+            val pltVal = rawConfig["plt_engine"].orEmpty().ifEmpty { "yukiplt" }
             withContext(Dispatchers.Main) {
                 zygiskInfo = info
                 zygiskModules = modules
                 isBuiltinEnabled = builtinEnabled
-                customLinker = configMap["custom_linker"] == true
-                anonymousMemory = configMap["anonymous_memory"] == true
+                customLinker = rawConfig["custom_linker"] == "1" || rawConfig["custom_linker"] == "true"
+                anonymousMemory = rawConfig["anonymous_memory"] == "1" || rawConfig["anonymous_memory"] == "true"
+                pltEngineIndex = pltEngines.indexOf(pltVal).coerceAtLeast(0)
                 isChecking = false
             }
         }
@@ -227,6 +232,24 @@ fun ZygiskScreen(
                                         val ok = ksuCli.setZygiskConfig("anonymous_memory", checked)
                                         snackBarHost.showReplacingSnackbar(
                                             if (ok) "Anonymous Memory ${if (checked) "enabled" else "disabled"}" else "Failed to update anonymous_memory",
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                        item {
+                            SettingsChooseWidget(
+                                title = "PLT Hook Engine",
+                                items = pltEngines,
+                                selectedIndex = pltEngineIndex,
+                                icon = Icons.TwoTone.Security,
+                                onSelectedIndexChange = { idx ->
+                                    pltEngineIndex = idx
+                                    val engine = pltEngines[idx]
+                                    scope.launch(Dispatchers.IO) {
+                                        val ok = ksuCli.setZygiskConfigValue("plt_engine", engine)
+                                        snackBarHost.showReplacingSnackbar(
+                                            if (ok) "PLT Engine set to $engine" else "Failed to set plt_engine",
                                         )
                                     }
                                 },

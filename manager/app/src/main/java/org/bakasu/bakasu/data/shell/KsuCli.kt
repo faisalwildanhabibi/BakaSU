@@ -800,7 +800,7 @@ class KsuCliRepository(context: Context) {
 
     fun syncZygiskNoMount(): Boolean = execKsud("zygisk nomount-sync")
 
-    fun getZygiskConfig(): Map<String, Boolean> = runCatching {
+    fun getZygiskConfigRaw(): Map<String, String> = runCatching {
         val out = ShellUtils.fastCmd(getRootShell(), "${getKsuDaemonPath()} zygisk config get").trim()
         if (!out.startsWith("{")) return emptyMap()
         val json = JSONObject(out)
@@ -808,13 +808,18 @@ class KsuCliRepository(context: Context) {
             val keys = json.keys()
             while (keys.hasNext()) {
                 val k = keys.next()
-                val v = json.opt(k)
-                put(k, v == true || v == 1 || v == "1" || v == "true")
+                put(k, json.optString(k, ""))
             }
         }
     }.getOrDefault(emptyMap())
 
-    fun setZygiskConfig(key: String, enabled: Boolean): Boolean = execKsud("zygisk config set $key ${if (enabled) 1 else 0}")
+    fun setZygiskConfigValue(key: String, value: String): Boolean = execKsud("zygisk config set $key $value")
+
+    fun getZygiskConfig(): Map<String, Boolean> = getZygiskConfigRaw().mapValues { (_, v) ->
+        v == "1" || v.equals("true", ignoreCase = true)
+    }
+
+    fun setZygiskConfig(key: String, enabled: Boolean): Boolean = setZygiskConfigValue(key, if (enabled) "1" else "0")
 
     fun getKTuneStatusJson(): String = runCatching {
         val shell = getRootShell()
