@@ -70,12 +70,12 @@ private val THERMAL_PROFILES = listOf(
     14 to "Youtube (14)",
 )
 
-private val CHARGE_LIMIT_VALUES = listOf(60, 70, 80, 90, 100)
+private val CHARGE_LIMIT_VALUES = listOf(70, 80, 90, 95, 100)
 private val CHARGE_CURRENT_VALUES = listOf(1000000L, 2000000L, 3000000L, 4000000L, 5000000L, 6000000L)
 private val SWAPPINESS_VALUES = listOf(10, 30, 60, 100, 130)
 private val VFS_CACHE_VALUES = listOf(20, 50, 100, 150, 200)
 private val KCOMPRESSD_VALUES = listOf(0, 8, 16, 24, 32)
-private val ZRAM_SIZE_MB_VALUES = listOf(0, 1024, 2048, 3072, 4096, 6144, 8192)
+private val ZRAM_SIZE_GB_VALUES = listOf(2, 3, 4, 6, 8)
 private val QDISC_VALUES = listOf("fq", "fq_codel", "pfifo_fast", "cake")
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,7 +94,8 @@ fun KTuneScreen(
     var thermalIdx by remember { mutableIntStateOf(0) }
     var isBypassCharging by remember { mutableStateOf(false) }
     var isChargeLimitEnabled by remember { mutableStateOf(false) }
-    var chargeLimitIdx by remember { mutableIntStateOf(2) }
+    var chargeLimitIdx by remember { mutableIntStateOf(1) }
+    var isChargeWritable by remember { mutableStateOf(false) }
     var chargeCurrentIdx by remember { mutableIntStateOf(2) }
     var tcpIndex by remember { mutableIntStateOf(0) }
     var tcpAvailable by remember { mutableStateOf(listOf("bbr", "cubic", "reno")) }
@@ -102,7 +103,7 @@ fun KTuneScreen(
     var swappinessIdx by remember { mutableIntStateOf(2) }
     var vfsCacheIdx by remember { mutableIntStateOf(2) }
     var kcompressdIdx by remember { mutableIntStateOf(3) }
-    var zramSizeIdx by remember { mutableIntStateOf(4) }
+    var zramSizeIdx by remember { mutableIntStateOf(2) }
     var zramAlgoIndex by remember { mutableIntStateOf(0) }
     var zramCompAvailable by remember { mutableStateOf(listOf("lz4", "lzo-rle", "zstd")) }
     var persistEnabled by remember { mutableStateOf(false) }
@@ -112,15 +113,16 @@ fun KTuneScreen(
             val map = ksuCli.getKTuneStatus()
             statusMap = map
 
-            val tId = map["thermal_profile"]?.toIntOrNull() ?: -1
+            val tId = map["thermal_current"]?.toIntOrNull() ?: -1
             thermalIdx = THERMAL_PROFILES.indexOfFirst { it.first == tId }.coerceAtLeast(0)
 
-            isBypassCharging = map["bypass"] == "1"
+            isBypassCharging = map["bypass_current"] == "1"
             isChargeLimitEnabled = map["charge_limit_enabled"] == "1"
 
-            val cl = map["charge_limit"]?.toIntOrNull() ?: 80
-            chargeLimitIdx = CHARGE_LIMIT_VALUES.indexOfFirst { it == cl }.let { if (it >= 0) it else 2 }
+            val cl = map["charge_limit_percent"]?.toIntOrNull() ?: 80
+            chargeLimitIdx = CHARGE_LIMIT_VALUES.indexOfFirst { it == cl }.let { if (it >= 0) it else 1 }
 
+            isChargeWritable = map["charge_writable"] == "1"
             val cc = map["charge_current"]?.toLongOrNull() ?: 3000000L
             chargeCurrentIdx = CHARGE_CURRENT_VALUES.indices.minByOrNull {
                 kotlin.math.abs(CHARGE_CURRENT_VALUES[it] - cc)
@@ -149,17 +151,17 @@ fun KTuneScreen(
                 kotlin.math.abs(KCOMPRESSD_VALUES[it] - kcomp)
             } ?: 3
 
-            val zramMb = ((map["zram_disksize"]?.toLongOrNull() ?: 0L) / (1024L * 1024L)).toInt()
-            zramSizeIdx = ZRAM_SIZE_MB_VALUES.indices.minByOrNull {
-                kotlin.math.abs(ZRAM_SIZE_MB_VALUES[it] - zramMb)
-            } ?: 0
+            val zramGb = kotlin.math.round((map["zram_disksize"]?.toLongOrNull() ?: 0L).toDouble() / (1024.0 * 1024.0 * 1024.0)).toInt()
+            zramSizeIdx = ZRAM_SIZE_GB_VALUES.indices.minByOrNull {
+                kotlin.math.abs(ZRAM_SIZE_GB_VALUES[it] - zramGb)
+            } ?: 2
 
             val zramAlgos = map["zram_comp_available"]?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
             if (zramAlgos.isNotEmpty()) zramCompAvailable = zramAlgos
             val zramCur = map["zram_comp_current"].orEmpty()
             zramAlgoIndex = zramCompAvailable.indexOf(zramCur).coerceAtLeast(0)
 
-            persistEnabled = map["persist_enabled"] == "1"
+            persistEnabled = map["persist"] == "1"
         }
     }
 
@@ -167,7 +169,6 @@ fun KTuneScreen(
     val bypassSupported = statusMap["bypass_supported"] != "0"
     val chargeLimitSupported = statusMap["charge_limit_supported"] != "0"
     val chargeCurrentSupported = statusMap["charge_current_supported"] != "0"
-    val chargeWritable = statusMap["charge_writable"] != "0"
     val swappinessRo = statusMap["mem_swappiness_ro"] == "1"
     val zramSupported = statusMap["zram_supported"] != "0"
 
@@ -293,11 +294,28 @@ fun KTuneScreen(
                         }
                         if (chargeCurrentSupported) {
                             item {
+                                SettingsSwitchWidget(
+                                    title = "Unlock Charge Current Node",
+                                    description = "Set charging current sysfs node writable (0644)",
+                                    icon = Icons.TwoTone.Bolt,
+                                    checked = isChargeWritable,
+                                    onCheckedChange = { checked ->
+                                        isChargeWritable = checked
+                                        scope.launch(Dispatchers.IO) {
+                                            val ok = ksuCli.setKTuneChargeWritable(checked)
+                                            snackBarHost.showReplacingSnackbar(
+                                                if (ok) "Charge current writable: $checked" else "Failed to toggle charge-writable",
+                                            )
+                                        }
+                                    },
+                                )
+                            }
+                            item {
                                 SettingsChooseWidget(
                                     title = "Charging Current Limit",
                                     items = CHARGE_CURRENT_VALUES.map { "${it / 1000} mA" },
                                     selectedIndex = chargeCurrentIdx,
-                                    enabled = chargeWritable,
+                                    enabled = isChargeWritable,
                                     icon = Icons.TwoTone.Bolt,
                                     onSelectedIndexChange = { idx ->
                                         chargeCurrentIdx = idx
@@ -434,16 +452,16 @@ fun KTuneScreen(
                         item {
                             SettingsChooseWidget(
                                 title = "ZRAM Disk Size",
-                                items = ZRAM_SIZE_MB_VALUES.map { if (it == 0) "Disabled" else "${it / 1024f} GB ($it MB)" },
+                                items = ZRAM_SIZE_GB_VALUES.map { "$it GB" },
                                 selectedIndex = zramSizeIdx,
                                 icon = Icons.TwoTone.Storage,
                                 onSelectedIndexChange = { idx ->
                                     zramSizeIdx = idx
-                                    val mb = ZRAM_SIZE_MB_VALUES[idx]
+                                    val gb = ZRAM_SIZE_GB_VALUES[idx]
                                     scope.launch(Dispatchers.IO) {
-                                        val ok = ksuCli.setKTuneZramSize(mb)
+                                        val ok = ksuCli.setKTuneZramSize(gb)
                                         snackBarHost.showReplacingSnackbar(
-                                            if (ok) "ZRAM size set to $mb MB" else "Failed to set ZRAM size",
+                                            if (ok) "ZRAM size set to $gb GB" else "Failed to set ZRAM size",
                                         )
                                     }
                                 },

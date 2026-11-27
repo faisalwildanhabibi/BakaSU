@@ -841,6 +841,8 @@ class KsuCliRepository(context: Context) {
 
     fun setKTuneChargeCurrent(ua: Long): Boolean = execKsud("tuning charge-current $ua")
 
+    fun setKTuneChargeWritable(enabled: Boolean): Boolean = execKsud("tuning charge-writable ${if (enabled) 1 else 0}")
+
     fun setKTuneTcpCongestion(algo: String): Boolean = execKsud("tuning tcp-congestion $algo")
 
     fun setKTuneQdisc(qdisc: String): Boolean = execKsud("tuning qdisc $qdisc")
@@ -851,7 +853,11 @@ class KsuCliRepository(context: Context) {
 
     fun setKTuneKcompressd(value: Int): Boolean = execKsud("tuning kcompressd $value")
 
-    fun setKTuneZramSize(mb: Int): Boolean = execKsud("tuning zram-size $mb")
+    fun setKTuneMglru(enabled: Boolean): Boolean = execKsud("tuning mglru ${if (enabled) 1 else 0}")
+
+    fun setKTuneMglruTtl(ms: Int): Boolean = execKsud("tuning mglru-ttl $ms")
+
+    fun setKTuneZramSize(gb: Int): Boolean = execKsud("tuning zram-size $gb")
 
     fun setKTuneZramAlgorithm(algo: String): Boolean = execKsud("tuning zram-algorithm $algo")
 
