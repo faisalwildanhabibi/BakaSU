@@ -1061,7 +1061,9 @@ class KsuCliRepository(context: Context) {
                 val keys = stObj.keys()
                 while (keys.hasNext()) {
                     val key = keys.next()
-                    val arr = stObj.optJSONArray(key) ?: continue
+                    val arr = stObj.optJSONArray(key)
+                        ?: stObj.optJSONObject(key)?.optJSONArray("settingsList")
+                        ?: continue
                     val items = mutableListOf<String>()
                     for (i in 0 until arr.length()) {
                         arr.optString(i).takeIf { it.isNotEmpty() }?.let { items.add(it) }

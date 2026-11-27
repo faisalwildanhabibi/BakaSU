@@ -153,17 +153,7 @@ fn get_root_granted_uids() -> HashSet<u32> {
 pub fn status() -> HmaStatus {
     let installed = is_installed();
     let enabled = is_enabled();
-    let mut version = String::from("177-UID3.1");
-
-    let prop_path = Path::new(BUILTIN_HMA_DIR).join("module.prop");
-    if let Ok(file) = File::open(prop_path) {
-        for line in BufReader::new(file).lines().map_while(Result::ok) {
-            if let Some(rest) = line.strip_prefix("version=") {
-                version = rest.trim().to_string();
-                break;
-            }
-        }
-    }
+    let version = String::from("177-UID3.1");
 
     let mut uid_scope_ready = false;
     let mut scoped_apps_count = 0;
@@ -229,6 +219,8 @@ fn read_or_init_config(hma_dir: &Path) -> Value {
         ("errorOnlyLog", serde_json::json!(false)),
         ("maxLogSize", serde_json::json!(512)),
         ("ignoredPackagesForPresets", serde_json::json!([])),
+        ("defaultConfig", serde_json::json!(null)),
+        ("disabledHooks", serde_json::json!([])),
         ("settingsTemplates", serde_json::json!({})),
         ("templates", serde_json::json!({})),
         ("scope", serde_json::json!({})),

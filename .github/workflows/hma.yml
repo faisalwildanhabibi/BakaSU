@@ -80,18 +80,6 @@ jobs:
           # Extract classes.dex from zygote release APK
           apk="$(find zygote/build/outputs/apk/release -name '*.apk' | head -n 1)"
           unzip -p "$apk" classes.dex > payload_output/classes.dex
-          
-          cat << 'EOF' > payload_output/module.prop
-          id=hma_oss_zygisk
-          name=HMA-OSS Zygisk + UID
-          version=177-UID3.1
-          versionCode=7304667
-          minSdkVersion=29
-          author=frknkrc44; local scoped UID integration
-          description=System service loaded by HMA; optional scoped ARM64 UID filtering
-          entrypoint=org.frknkrc44.hma_oss.zygote.ZygoteEntry
-          attachNativeLibs=false
-          EOF
 
       - name: Upload HMA Payload Artifact
         uses: actions/upload-artifact@v7
