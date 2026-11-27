@@ -135,6 +135,9 @@ fn find_or_create_active_hma_dir() -> Result<PathBuf> {
 
 fn get_root_granted_uids() -> HashSet<u32> {
     let mut root_uids = HashSet::new();
+    if let Ok(allow_uids) = crate::android::ksucalls::get_allow_list() {
+        root_uids.extend(allow_uids);
+    }
     let profile_dir = Path::new("/data/adb/ksu/profile");
     if let Ok(entries) = fs::read_dir(profile_dir) {
         for entry in entries.flatten() {
@@ -1010,6 +1013,7 @@ pub fn sync_uid_scope() -> Result<usize> {
             let uid = all_packages.get(pkg).copied().unwrap_or(0);
             !system_packages.contains(pkg)
                 && !root_granted_uids.contains(&uid)
+                && !PRESET_HIDDEN_PACKAGES.contains(&pkg.as_str())
                 && !LAUNCHER_AND_SYSTEM_UI_EXCLUDES.contains(&pkg.as_str())
         });
         for (pkg, _uid) in &user_non_root_apps {

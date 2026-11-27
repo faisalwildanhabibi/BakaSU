@@ -562,3 +562,28 @@ pub fn umount_list_list() -> anyhow::Result<Vec<MountInfo>> {
 
     Ok(list)
 }
+
+pub fn get_allow_list() -> Result<Vec<u32>> {
+    let mut probe = uapi::ksu_new_get_allow_list_cmd {
+        count: 0,
+        total_count: 0,
+        uids: Default::default(),
+    };
+    ksuctl(uapi::KSU_IOCTL_NEW_GET_ALLOW_LIST_RUST, &raw mut probe)?;
+    let total = probe.total_count as usize;
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+    let header_size = std::mem::size_of::<uapi::ksu_new_get_allow_list_cmd>();
+    let mut buf = vec![0u8; header_size + total * std::mem::size_of::<u32>()];
+    let cmd_ptr = buf.as_mut_ptr().cast::<uapi::ksu_new_get_allow_list_cmd>();
+    unsafe {
+        (*cmd_ptr).count = probe.total_count;
+        (*cmd_ptr).total_count = 0;
+        ksuctl(uapi::KSU_IOCTL_NEW_GET_ALLOW_LIST_RUST, cmd_ptr)?;
+        let count = ((*cmd_ptr).count as usize).min(total);
+        let uids_ptr = buf.as_ptr().add(header_size).cast::<u32>();
+        let uids = std::slice::from_raw_parts(uids_ptr, count).to_vec();
+        Ok(uids)
+    }
+}

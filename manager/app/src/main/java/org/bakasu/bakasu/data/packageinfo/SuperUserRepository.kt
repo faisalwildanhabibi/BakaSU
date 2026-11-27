@@ -70,7 +70,6 @@ class SuperUserRepository(
                 val packageManager = application.packageManager
                 val apps = packages.mapNotNull { info ->
                     val applicationInfo = info.applicationInfo ?: return@mapNotNull null
-                    if (info.packageName == application.packageName) return@mapNotNull null
                     if (applicationInfo.uid == WEBVIEW_ZYGOTE_UID) return@mapNotNull null
                     InstalledApp(
                         packageName = info.packageName,

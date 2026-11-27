@@ -1,5 +1,6 @@
 package org.bakasu.bakasu.ui.screen.hma
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -113,8 +114,11 @@ fun HMAScreen(
     val tabs = listOf("Settings", "Scope", "Templates", "Paths")
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            Column {
+            Column(
+                modifier = Modifier.background(MaterialTheme.colorScheme.surface),
+            ) {
                 LargeFlexibleTopAppBar(
                     title = { Text(stringResource(R.string.settings_hma_title)) },
                     navigationIcon = {
@@ -129,13 +133,13 @@ fun HMAScreen(
                     },
                     scrollBehavior = scrollBehavior,
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        scrolledContainerColor = Color.Transparent,
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                     ),
                 )
                 PrimaryTabRow(
                     selectedTabIndex = selectedTab,
-                    containerColor = Color.Transparent,
+                    containerColor = MaterialTheme.colorScheme.surface,
                 ) {
                     tabs.forEachIndexed { index, title ->
                         Tab(

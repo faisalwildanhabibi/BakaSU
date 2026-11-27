@@ -488,6 +488,9 @@ fn matches_target(process: &ProcessEntry, target: &str) -> bool {
 }
 
 pub fn injected_modules() -> Vec<InjectedModule> {
+    if !is_enabled() {
+        return installed_modules();
+    }
     let content = runtime_prop_content().unwrap_or_default();
     let reported = daemon_reported_modules(&content);
     if reported.is_empty() {
@@ -500,7 +503,11 @@ pub fn injected_modules() -> Vec<InjectedModule> {
 
     let mut order: Vec<String> = Vec::new();
     let mut merged: HashMap<String, InjectedModule> = HashMap::new();
+    let hma_enabled = crate::android::hma::is_enabled();
     for (abi, entry) in reported {
+        if entry.id == crate::defs::BUILTIN_HMA_MODULE_ID && !hma_enabled {
+            continue;
+        }
         let module = merged.entry(entry.id.clone()).or_insert_with(|| {
             order.push(entry.id.clone());
             let (name, version) = module_identity(&entry.id);
@@ -612,8 +619,18 @@ fn installed_modules() -> Vec<InjectedModule> {
             abi.push("32".to_owned());
         }
         let (name, version) = module_identity(&id);
-        let state = if provider_info().state == "running" {
-            "loaded".to_owned()
+        let provider = provider_info();
+        let state = if provider.state == "running" {
+            if is_next || provider.id == "zygisksu" {
+                let zn_state = zn_module_state(&id);
+                if zn_state == "unknown" {
+                    "injected".to_owned()
+                } else {
+                    zn_state
+                }
+            } else {
+                "loaded".to_owned()
+            }
         } else {
             "unknown".to_owned()
         };
