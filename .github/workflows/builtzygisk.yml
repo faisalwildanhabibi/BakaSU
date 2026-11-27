@@ -71,7 +71,6 @@ jobs:
           for arch in aarch64 arm x86_64 riscv64; do
             mkdir -p "$out/$arch"
             cp module/src/sepolicy.rule "$out/$arch/zygisk-sepolicy.rule"
-            cp extracted/module.prop "$out/$arch/zygisk-module.prop"
           done
 
           copy() {

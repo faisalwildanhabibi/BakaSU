@@ -26,8 +26,9 @@ use std::{
 /// Shipped next to the binaries by CI, extracted from BuiltZygisk's
 /// `module/src/sepolicy.rule` so the rules never drift from the loader.
 const ASSET_SEPOLICY: &str = "zygisk-sepolicy.rule";
-/// The resolved `module.prop` of the BuiltZygisk release zip.
-const ASSET_MODULE_PROP: &str = "zygisk-module.prop";
+/// Non-module built-in display name and version.
+const BUILTIN_ZYGISK_NAME: &str = "Built-in Zygisk";
+const BUILTIN_ZYGISK_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The loader the zygote is injected with; a live handover needs both sides identical.
 const ASSET_ZYGISK_LIB: &str = "libzygisk.so";
 /// The 32-bit loader, for devices with a 32-bit zygote.
@@ -667,11 +668,7 @@ fn module_prop() -> Option<HashMap<String, String>> {
             return Some(prop);
         }
     }
-    if let Ok(content) = fs::read_to_string(Path::new(BUILTIN_ZYGISK_DIR).join("module.prop")) {
-        return Some(parse_module_prop(&content));
-    }
-    let data = crate::assets::get_asset(ASSET_MODULE_PROP).ok()?;
-    Some(parse_module_prop(&String::from_utf8_lossy(&data)))
+    None
 }
 
 fn is_monitor_tracing() -> bool {
@@ -770,15 +767,12 @@ pub struct ImplementationInfo {
 
 pub fn implementation_info() -> ImplementationInfo {
     if is_enabled() {
-        let prop = module_prop().unwrap_or_default();
         let running = is_monitor_active() || is_daemon_active();
         return ImplementationInfo {
             state: if running { "running" } else { "reboot" },
             id: BUILTIN_TARGET.to_owned(),
-            name: prop.get("name").cloned().unwrap_or_default(),
-            version: prop
-                .get("version")
-                .map_or_else(String::new, |v| short_version(v)),
+            name: BUILTIN_ZYGISK_NAME.to_owned(),
+            version: BUILTIN_ZYGISK_VERSION.to_owned(),
         };
     }
 
@@ -1305,16 +1299,9 @@ fn wait_until(mut condition: impl FnMut() -> bool, secs: u32) -> bool {
 }
 
 pub fn version() -> Option<(String, String)> {
-    let content = fs::read_to_string(Path::new(BUILTIN_ZYGISK_DIR).join("module.prop")).ok()?;
-    let get = |key: &str| {
-        content
-            .lines()
-            .find_map(|line| line.strip_prefix(key))
-            .map(|v| v.trim().to_owned())
-    };
     Some((
-        short_version(&get("version=")?),
-        get("versionCode=").unwrap_or_default(),
+        BUILTIN_ZYGISK_VERSION.to_owned(),
+        BUILTIN_ZYGISK_VERSION.to_owned(),
     ))
 }
 
@@ -1422,23 +1409,9 @@ fn stage_assets(dir: &Path) {
     let is_64bit = cfg!(target_pointer_width = "64");
     let bits = if is_64bit { "64" } else { "32" };
 
-    match crate::assets::get_asset(ASSET_MODULE_PROP) {
-        Ok(data) => {
-            let path = dir.join("module.prop");
-            let staged = fs::read(&path).ok();
-            let new_version = |d: &[u8]| {
-                String::from_utf8_lossy(d)
-                    .lines()
-                    .find(|l| l.starts_with("versionCode="))
-                    .map(str::to_owned)
-            };
-            if staged.as_deref().and_then(new_version) != new_version(&data)
-                && let Err(e) = fs::write(&path, &*data)
-            {
-                warn!("write {} failed: {e}", path.display());
-            }
-        }
-        Err(_) => warn!("built-in Zygisk module.prop asset missing"),
+    let stale_prop = dir.join("module.prop");
+    if stale_prop.exists() {
+        let _ = fs::remove_file(stale_prop);
     }
 
     for (asset, dst) in [

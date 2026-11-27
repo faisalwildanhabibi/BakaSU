@@ -800,6 +800,22 @@ class KsuCliRepository(context: Context) {
 
     fun syncZygiskNoMount(): Boolean = execKsud("zygisk nomount-sync")
 
+    fun getZygiskConfig(): Map<String, Boolean> = runCatching {
+        val out = ShellUtils.fastCmd(getRootShell(), "${getKsuDaemonPath()} zygisk config get").trim()
+        if (!out.startsWith("{")) return emptyMap()
+        val json = JSONObject(out)
+        buildMap {
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val v = json.opt(k)
+                put(k, v == true || v == 1 || v == "1" || v == "true")
+            }
+        }
+    }.getOrDefault(emptyMap())
+
+    fun setZygiskConfig(key: String, enabled: Boolean): Boolean = execKsud("zygisk config set $key ${if (enabled) 1 else 0}")
+
     fun getKTuneStatusJson(): String = runCatching {
         val shell = getRootShell()
         ShellUtils.fastCmd(shell, "${getKsuDaemonPath()} tuning status")

@@ -63,6 +63,8 @@ fun ZygiskScreen(
     var isBuiltinEnabled by remember { mutableStateOf(false) }
     var zygiskInfo by remember { mutableStateOf(KsuCliRepository.ZygiskInfo()) }
     var zygiskModules by remember { mutableStateOf<List<KsuCliRepository.ZygiskModuleInfo>>(emptyList()) }
+    var customLinker by remember { mutableStateOf(false) }
+    var anonymousMemory by remember { mutableStateOf(false) }
     var isChecking by remember { mutableStateOf(true) }
 
     fun refreshState() {
@@ -71,11 +73,14 @@ fun ZygiskScreen(
             val info = ksuCli.getZygiskInfo()
             val modules = ksuCli.getZygiskModules()
             val statusJson = ksuCli.getZygiskStatusJson()
+            val configMap = ksuCli.getZygiskConfig()
             val builtinEnabled = statusJson.contains("\"enabled\":true") || statusJson.contains("\"enabled\": true")
             withContext(Dispatchers.Main) {
                 zygiskInfo = info
                 zygiskModules = modules
                 isBuiltinEnabled = builtinEnabled
+                customLinker = configMap["custom_linker"] == true
+                anonymousMemory = configMap["anonymous_memory"] == true
                 isChecking = false
             }
         }
@@ -178,6 +183,50 @@ fun ZygiskScreen(
                                         refreshState()
                                         snackBarHost.showReplacingSnackbar(
                                             if (ok) "Zygisk rearmed successfully" else "Failed to rearm Zygisk",
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isBuiltinEnabled) {
+                item {
+                    SegmentedColumn(
+                        title = "Stealth & Loader",
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    ) {
+                        item {
+                            SettingsSwitchWidget(
+                                title = "Custom ELF Linker",
+                                description = "Load modules directly into memory without entering system solist",
+                                icon = Icons.TwoTone.Security,
+                                checked = customLinker,
+                                onCheckedChange = { checked ->
+                                    customLinker = checked
+                                    scope.launch(Dispatchers.IO) {
+                                        val ok = ksuCli.setZygiskConfig("custom_linker", checked)
+                                        snackBarHost.showReplacingSnackbar(
+                                            if (ok) "Custom ELF Linker ${if (checked) "enabled" else "disabled"}" else "Failed to update custom_linker",
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                        item {
+                            SettingsSwitchWidget(
+                                title = "Anonymous Memory",
+                                description = "Convert module memory mappings in /proc/self/maps to anonymous",
+                                icon = Icons.TwoTone.Security,
+                                checked = anonymousMemory,
+                                onCheckedChange = { checked ->
+                                    anonymousMemory = checked
+                                    scope.launch(Dispatchers.IO) {
+                                        val ok = ksuCli.setZygiskConfig("anonymous_memory", checked)
+                                        snackBarHost.showReplacingSnackbar(
+                                            if (ok) "Anonymous Memory ${if (checked) "enabled" else "disabled"}" else "Failed to update anonymous_memory",
                                         )
                                     }
                                 },
