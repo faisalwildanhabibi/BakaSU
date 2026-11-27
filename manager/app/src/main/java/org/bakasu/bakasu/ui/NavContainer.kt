@@ -615,6 +615,83 @@ fun NavContainer(
                     KTuneScreen()
                 }
             }
+            entry<Route.KTuneBattery>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    org.bakasu.bakasu.ui.screen.ktune.KTuneBatteryScreen()
+                }
+            }
+            entry<Route.KTuneThermalMonitor>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    org.bakasu.bakasu.ui.screen.ktune.KTuneThermalMonitorScreen()
+                }
+            }
+            entry<Route.KTuneColorCalibration>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    org.bakasu.bakasu.ui.screen.ktune.KTuneColorCalibrationScreen()
+                }
+            }
+            entry<Route.KTuneCpuMonitor>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    org.bakasu.bakasu.ui.screen.ktune.KTuneCpuMonitorScreen()
+                }
+            }
+            entry<Route.KTuneGpuMonitor>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    org.bakasu.bakasu.ui.screen.ktune.KTuneGpuMonitorScreen()
+                }
+            }
+            entry<Route.KTuneWakelock>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    org.bakasu.bakasu.ui.screen.ktune.KTuneWakelockScreen()
+                }
+            }
+            entry<Route.KTunePerfTop>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    org.bakasu.bakasu.ui.screen.ktune.KTunePerfTopScreen()
+                }
+            }
             entry<Route.ZygiskSettings>(swipeDismiss = swipeBackDirection) {
                 ManagerNavEntry(
                     interceptPredictiveBack = interceptPredictiveBack,

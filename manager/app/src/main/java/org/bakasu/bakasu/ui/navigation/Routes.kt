@@ -173,6 +173,34 @@ sealed interface Route :
 
     @Parcelize
     @Serializable
+    data object KTuneBattery : Route
+
+    @Parcelize
+    @Serializable
+    data object KTuneThermalMonitor : Route
+
+    @Parcelize
+    @Serializable
+    data object KTuneColorCalibration : Route
+
+    @Parcelize
+    @Serializable
+    data object KTuneCpuMonitor : Route
+
+    @Parcelize
+    @Serializable
+    data object KTuneGpuMonitor : Route
+
+    @Parcelize
+    @Serializable
+    data object KTuneWakelock : Route
+
+    @Parcelize
+    @Serializable
+    data object KTunePerfTop : Route
+
+    @Parcelize
+    @Serializable
     data object ZygiskSettings : Route
 
     @Parcelize

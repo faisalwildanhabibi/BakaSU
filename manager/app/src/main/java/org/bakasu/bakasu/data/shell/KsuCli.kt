@@ -863,6 +863,156 @@ class KsuCliRepository(context: Context) {
 
     fun setKTunePersist(enabled: Boolean): Boolean = execKsud("tuning persist ${if (enabled) 1 else 0}")
 
+    data class CpuCoreInfo(
+        val coreIndex: Int,
+        val curFreqKhz: Long,
+        val minFreqKhz: Long,
+        val maxFreqKhz: Long,
+        val governor: String,
+    )
+
+    data class WakeupSourceInfo(
+        val name: String,
+        val activeCount: Long,
+        val totalTimeMs: Long,
+        val maxTimeMs: Long,
+    )
+
+    fun getBatteryDetails(): Map<String, String> = runCatching {
+        val keys = listOf(
+            "capacity",
+            "status",
+            "health",
+            "technology",
+            "voltage_now",
+            "current_now",
+            "temp",
+            "cycle_count",
+            "charge_full",
+            "charge_full_design",
+        )
+        val cmd = keys.joinToString("; ") { k -> "echo \"$k=\$(cat /sys/class/power_supply/battery/$k 2>/dev/null)\"" }
+        runCmd(getRootShell(), cmd).lineSequence()
+            .filter { it.contains('=') }
+            .associate {
+                val i = it.indexOf('=')
+                it.substring(0, i) to it.substring(i + 1).trim()
+            }
+    }.getOrDefault(emptyMap())
+
+    fun getThermalZones(): List<Pair<String, Float>> = runCatching {
+        val out = runCmd(
+            getRootShell(),
+            "for z in /sys/class/thermal/thermal_zone*; do [ -d \"\$z\" ] && echo \"\$(cat \$z/type 2>/dev/null)|\$(cat \$z/temp 2>/dev/null)\"; done",
+        )
+        out.lineSequence()
+            .mapNotNull { line ->
+                val parts = line.split('|')
+                if (parts.size != 2) return@mapNotNull null
+                val name = parts[0].trim()
+                val raw = parts[1].trim().toFloatOrNull() ?: return@mapNotNull null
+                if (name.isEmpty()) return@mapNotNull null
+                val celsius = if (raw > 1000f || raw < -1000f) raw / 1000f else raw
+                name to celsius
+            }.toList()
+    }.getOrDefault(emptyList())
+
+    fun getKcalState(): Map<String, String> = runCatching {
+        val dir = "/sys/devices/platform/kcal_ctrl.0"
+        val out = runCmd(
+            getRootShell(),
+            "if [ -d $dir ]; then for k in kcal kcal_sat kcal_val kcal_cont kcal_hue kcal_enable; do echo \"\$k=\$(cat $dir/\$k 2>/dev/null)\"; done; fi",
+        )
+        out.lineSequence()
+            .filter { it.contains('=') }
+            .associate {
+                val i = it.indexOf('=')
+                it.substring(0, i) to it.substring(i + 1).trim()
+            }
+    }.getOrDefault(emptyMap())
+
+    fun setKcalValues(r: Int, g: Int, b: Int, sat: Int, value: Int, cont: Int, hue: Int): Boolean {
+        val dir = "/sys/devices/platform/kcal_ctrl.0"
+        val cmd = "echo 1 > $dir/kcal_enable && echo \"$r $g $b\" > $dir/kcal && echo $sat > $dir/kcal_sat && echo $value > $dir/kcal_val && echo $cont > $dir/kcal_cont && echo $hue > $dir/kcal_hue"
+        return ShellUtils.fastCmdResult(getRootShell(), cmd)
+    }
+
+    fun getCpuCoresInfo(): List<CpuCoreInfo> = runCatching {
+        val out = runCmd(
+            getRootShell(),
+            "for c in /sys/devices/system/cpu/cpu[0-9]*; do id=\${c##*cpu}; [ -d \"\$c/cpufreq\" ] && echo \"\$id|\$(cat \$c/cpufreq/scaling_cur_freq 2>/dev/null)|\$(cat \$c/cpufreq/scaling_min_freq 2>/dev/null)|\$(cat \$c/cpufreq/scaling_max_freq 2>/dev/null)|\$(cat \$c/cpufreq/scaling_governor 2>/dev/null)\"; done",
+        )
+        out.lineSequence().mapNotNull { line ->
+            val p = line.split('|')
+            if (p.size < 5) return@mapNotNull null
+            CpuCoreInfo(
+                coreIndex = p[0].trim().toIntOrNull() ?: return@mapNotNull null,
+                curFreqKhz = p[1].trim().toLongOrNull() ?: 0L,
+                minFreqKhz = p[2].trim().toLongOrNull() ?: 0L,
+                maxFreqKhz = p[3].trim().toLongOrNull() ?: 0L,
+                governor = p[4].trim(),
+            )
+        }.sortedBy { it.coreIndex }.toList()
+    }.getOrDefault(emptyList())
+
+    fun getGpuInfo(): Map<String, String> = runCatching {
+        val base = "/sys/class/kgsl/kgsl-3d0"
+        val out = runCmd(
+            getRootShell(),
+            "echo \"busy=\$(cat $base/gpu_busy_percentage 2>/dev/null)\"; echo \"clock=\$(cat $base/clock_mhz 2>/dev/null)\"; echo \"freqs=\$(cat $base/gpu_available_frequencies 2>/dev/null)\"; echo \"gov=\$(cat $base/devfreq/governor 2>/dev/null)\"",
+        )
+        out.lineSequence()
+            .filter { it.contains('=') }
+            .associate {
+                val i = it.indexOf('=')
+                it.substring(0, i) to it.substring(i + 1).trim()
+            }
+    }.getOrDefault(emptyMap())
+
+    fun getWakeupSources(): List<WakeupSourceInfo> = runCatching {
+        val out = runCmd(
+            getRootShell(),
+            "for w in /sys/class/wakeup/wakeup*; do [ -d \"\$w\" ] && echo \"\$(cat \$w/name 2>/dev/null)|\$(cat \$w/active_count 2>/dev/null)|\$(cat \$w/total_time_ms 2>/dev/null)|\$(cat \$w/max_time_ms 2>/dev/null)\"; done",
+        )
+        out.lineSequence().mapNotNull { line ->
+            val p = line.split('|')
+            if (p.size < 4) return@mapNotNull null
+            val name = p[0].trim()
+            if (name.isEmpty()) return@mapNotNull null
+            WakeupSourceInfo(
+                name = name,
+                activeCount = p[1].trim().toLongOrNull() ?: 0L,
+                totalTimeMs = p[2].trim().toLongOrNull() ?: 0L,
+                maxTimeMs = p[3].trim().toLongOrNull() ?: 0L,
+            )
+        }.sortedByDescending { it.totalTimeMs }.take(60).toList()
+    }.getOrDefault(emptyList())
+
+    fun getPerfTopProcesses(): List<String> = runCatching {
+        val out = runCmd(getRootShell(), "top -b -n 1 -m 30 2>/dev/null || ps -A -o PID,USER,RSS,NAME 2>/dev/null")
+        out.lineSequence().map { it.trimEnd() }.filter { it.isNotBlank() }.take(40).toList()
+    }.getOrDefault(emptyList())
+
+    fun getDisplayDensity(): Pair<Int, Int> = runCatching {
+        val out = runCmd(getRootShell(), "wm density")
+        var physical = 0
+        var override = 0
+        out.lineSequence().forEach { line ->
+            val t = line.trim()
+            if (t.startsWith("Physical density:")) {
+                physical = t.substringAfter(":").trim().toIntOrNull() ?: 0
+            } else if (t.startsWith("Override density:")) {
+                override = t.substringAfter(":").trim().toIntOrNull() ?: 0
+            }
+        }
+        physical to (if (override > 0) override else physical)
+    }.getOrDefault(0 to 0)
+
+    fun setDisplayDensity(dpi: Int?): Boolean {
+        val cmd = if (dpi == null) "wm density reset" else "wm density $dpi"
+        return ShellUtils.fastCmdResult(getRootShell(), cmd)
+    }
+
     fun addKernelUmountPath(path: String, flags: Int): Boolean {
         val shell = getRootShell()
         val flagsArg = if (flags >= 0) "--flags $flags" else ""
