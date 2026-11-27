@@ -747,8 +747,11 @@ class KsuCliRepository(context: Context) {
 
     fun getZygiskModules(): List<ZygiskModuleInfo> = runCatching {
         val out = ShellUtils.fastCmd(getRootShell(), "${getKsuDaemonPath()} zygisk modules").trim()
-        if (!out.startsWith("[")) return emptyList()
-        val arr = JSONArray(out)
+        val arr = when {
+            out.startsWith("{") -> JSONObject(out).optJSONArray("modules")
+            out.startsWith("[") -> JSONArray(out)
+            else -> null
+        } ?: return emptyList()
         buildList {
             for (i in 0 until arr.length()) {
                 val obj = arr.optJSONObject(i) ?: continue
@@ -764,7 +767,7 @@ class KsuCliRepository(context: Context) {
                         id = obj.optString("id", ""),
                         name = obj.optString("name", ""),
                         version = obj.optString("version", ""),
-                        kind = obj.optString("kind", "zygisk"),
+                        kind = obj.optString("kind", obj.optString("type", "zygisk")),
                         abi = abis,
                         state = obj.optString("state", "unknown"),
                     ),

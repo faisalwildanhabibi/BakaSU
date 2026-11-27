@@ -80,6 +80,7 @@ pub fn enable() -> Result<()> {
         let _ = fs::remove_file(disable_file);
     }
     ensure_file_exists(BUILTIN_HMA_FLAG)?;
+    let _ = sync_uid_scope();
     info!("Built-in HMA OSS + UID has been enabled");
     Ok(())
 }
@@ -95,6 +96,7 @@ pub fn disable() -> Result<()> {
         let disable_file = dir.join(DISABLE_FILE_NAME);
         ensure_file_exists(&disable_file)?;
     }
+    let _ = sync_uid_scope();
     info!("Built-in HMA OSS + UID has been disabled");
     Ok(())
 }
@@ -567,11 +569,7 @@ fn sync_targeted_paths(
     let mut desired_rules: HashSet<(u32, String)> = HashSet::new();
 
     if enabled && let Some(scope_map) = config_obj.get("scope").and_then(Value::as_object) {
-        let data_app_dirs = if paths_cfg.auto_hide_app_paths {
-            collect_data_app_dirs()
-        } else {
-            HashMap::new()
-        };
+        let data_app_dirs = collect_data_app_dirs();
 
         for (target_pkg, app_cfg) in scope_map {
             let Some(&target_uid) = all_packages.get(target_pkg) else {
@@ -585,17 +583,25 @@ fn sync_targeted_paths(
 
             let mut exceptions: HashSet<String> = HashSet::new();
             let mut explicit_paths: Vec<String> = Vec::new();
+            let mut explicit_pkgs: Vec<String> = Vec::new();
             for item in raw_list {
-                if let Some(exc) = item.strip_prefix('!') {
+                let trimmed_item = item.trim();
+                if trimmed_item.is_empty() || trimmed_item.starts_with('#') {
+                    continue;
+                }
+                if let Some(exc) = trimmed_item.strip_prefix('!') {
                     let trimmed = exc.trim();
                     if !trimmed.is_empty() {
                         exceptions.insert(trimmed.to_string());
                     }
-                } else if item.starts_with('/') {
-                    explicit_paths.push(item.clone());
+                } else if trimmed_item.starts_with('/') {
+                    explicit_paths.push(trimmed_item.to_string());
+                } else {
+                    explicit_pkgs.push(trimmed_item.to_string());
                 }
             }
 
+            let mut pkgs_to_hide: HashSet<String> = explicit_pkgs.into_iter().collect();
             if paths_cfg.auto_hide_app_paths {
                 let hidden_pkgs = resolve_hidden_packages_for_app(
                     target_pkg,
@@ -604,23 +610,26 @@ fn sync_targeted_paths(
                     all_packages,
                     system_packages,
                 );
-                for h_pkg in hidden_pkgs {
-                    if exceptions.contains(&h_pkg) {
-                        continue;
-                    }
-                    if let Some(app_dir) = data_app_dirs.get(&h_pkg)
-                        && !exceptions.contains(app_dir)
-                    {
-                        desired_rules.insert((target_uid, app_dir.clone()));
-                    }
-                    for p in [
-                        format!("/data/data/{h_pkg}"),
-                        format!("/data/user/0/{h_pkg}"),
-                        format!("/storage/emulated/0/Android/data/{h_pkg}"),
-                    ] {
-                        if !exceptions.contains(&p) && Path::new(&p).exists() {
-                            desired_rules.insert((target_uid, p));
-                        }
+                pkgs_to_hide.extend(hidden_pkgs);
+            }
+
+            for h_pkg in pkgs_to_hide {
+                if exceptions.contains(&h_pkg) || h_pkg == *target_pkg {
+                    continue;
+                }
+                if let Some(app_dir) = data_app_dirs.get(&h_pkg)
+                    && !exceptions.contains(app_dir)
+                {
+                    desired_rules.insert((target_uid, app_dir.clone()));
+                }
+                for p in [
+                    format!("/data/data/{h_pkg}"),
+                    format!("/data/user/0/{h_pkg}"),
+                    format!("/storage/emulated/0/Android/data/{h_pkg}"),
+                    format!("/data/media/0/Android/data/{h_pkg}"),
+                ] {
+                    if !exceptions.contains(&p) && Path::new(&p).exists() {
+                        desired_rules.insert((target_uid, p));
                     }
                 }
             }
