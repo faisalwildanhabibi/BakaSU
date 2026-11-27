@@ -22,8 +22,8 @@
 #define EXPECTED_HASH_SUKISU "947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef"
 
 // faisalwildanhabibi/BakaSU (customSU)
-#define EXPECTED_SIZE_CUSTOM 0x02df
-#define EXPECTED_HASH_CUSTOM "d08d52d19bc5d325cda5e91fdd352097d55bc598fd78ed839df9e537389921c7"
+#define EXPECTED_SIZE_CUSTOM 0x30c
+#define EXPECTED_HASH_CUSTOM "0f6801ede3a06c38524b3ce0d5f2641855ab2e37238023e511608eef0f0001c6"
 
 typedef struct {
     unsigned size;
