@@ -1290,11 +1290,9 @@ class KsuCliRepository(context: Context) {
 
     fun deleteHmaTemplate(name: String): Boolean = execKsud("hma template delete ${shellQuote(name)}", true)
 
-    fun setHmaSettingsTemplate(name: String, json: String): Boolean =
-        execKsud("hma settings-template set ${shellQuote(name)} ${shellQuote(json)}", true)
+    fun setHmaSettingsTemplate(name: String, json: String): Boolean = execKsud("hma settings-template set ${shellQuote(name)} ${shellQuote(json)}", true)
 
-    fun deleteHmaSettingsTemplate(name: String): Boolean =
-        execKsud("hma settings-template delete ${shellQuote(name)}", true)
+    fun deleteHmaSettingsTemplate(name: String): Boolean = execKsud("hma settings-template delete ${shellQuote(name)}", true)
 
     fun setHmaAppScope(appScope: HmaAppScope): Boolean {
         val json = org.json.JSONObject().apply {

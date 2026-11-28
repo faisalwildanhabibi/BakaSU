@@ -564,7 +564,14 @@ fun HmaScopeEditorDialog(
                     )
                     val userTemplates = templates.values.filter {
                         it.isWhitelist == useWhitelist && it.name !in setOf(
-                            "root_apps", "detector_apps", "sus_apps", "custom_rom", "shizuku_dhizuku", "xposed", "accessibility_apps", "accessibility"
+                            "root_apps",
+                            "detector_apps",
+                            "sus_apps",
+                            "custom_rom",
+                            "shizuku_dhizuku",
+                            "xposed",
+                            "accessibility_apps",
+                            "accessibility",
                         )
                     }
                     if (userTemplates.isEmpty()) {

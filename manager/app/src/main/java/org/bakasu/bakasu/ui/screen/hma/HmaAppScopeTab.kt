@@ -179,7 +179,9 @@ fun HmaAppScopeTab(
                                 appScope.applySettingTemplates.size
                             "$mode • ${totalRules}T/${appScope.extraAppList.size}E"
                         }
+
                         isRootOrManager -> "Root App (Hidden)"
+
                         else -> "Off"
                     }
                     Text(
