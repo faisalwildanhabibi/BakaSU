@@ -62,12 +62,14 @@ fn get_active_vector_xposed_modules() -> HashSet<String> {
         return modules;
     }
 
-    if let Ok(val) = serde_json::from_slice::<Value>(&output.stdout) {
-        if let Some(arr) = val.get("data").and_then(Value::as_array) {
-            for item in arr {
-                if let Some(pkg) = item.get("PACKAGE").and_then(Value::as_str) {
-                    modules.insert(pkg.to_string());
-                }
+    let Ok(val) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return modules;
+    };
+
+    if let Some(arr) = val.get("data").and_then(Value::as_array) {
+        for item in arr {
+            if let Some(pkg) = item.get("PACKAGE").and_then(Value::as_str) {
+                modules.insert(pkg.to_string());
             }
         }
     }
@@ -1248,9 +1250,7 @@ pub fn sync_uid_scope() -> Result<usize> {
         {
             for app in existing_apps {
                 if let Some(s) = app.as_str() {
-                    if !list.contains(&s.to_string()) {
-                        list.push(s.to_string());
-                    }
+                    list.push(s.to_string());
                 }
             }
             list.sort();
