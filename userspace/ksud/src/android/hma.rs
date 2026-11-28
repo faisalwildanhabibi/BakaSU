@@ -173,32 +173,32 @@ fn get_root_granted_uids_and_packages() -> (HashSet<u32>, HashSet<String>) {
         root_uids.extend(allow_uids);
     }
 
-    if let Ok(bytes) = fs::read("/data/adb/ksu/.allowlist") {
-        if bytes.len() >= 8 {
-            let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
-            if magic == 0x4b53_5500 || magic == 0x7f4b_5355 {
-                let mut offset = 8;
-                const ENTRY_SIZE: usize = 784;
-                while offset + ENTRY_SIZE <= bytes.len() {
-                    let entry = &bytes[offset..offset + ENTRY_SIZE];
-                    let key_bytes = &entry[4..260];
-                    let key_len = key_bytes.iter().position(|&b| b == 0).unwrap_or(256);
-                    if let Ok(key) = std::str::from_utf8(&key_bytes[..key_len]) {
-                        let trimmed = key.trim();
-                        if !trimmed.is_empty() {
-                            let curr_uid =
-                                i32::from_le_bytes(entry[260..264].try_into().unwrap_or([0; 4]));
-                            let allow_su = entry[264] != 0;
-                            if allow_su {
-                                if curr_uid > 0 {
-                                    root_uids.insert(curr_uid as u32);
-                                }
-                                root_pkgs.insert(trimmed.to_string());
+    if let Ok(bytes) = fs::read("/data/adb/ksu/.allowlist")
+        && bytes.len() >= 8
+    {
+        let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
+        if magic == 0x4b53_5500 || magic == 0x7f4b_5355 {
+            let mut offset = 8;
+            const ENTRY_SIZE: usize = 784;
+            while offset + ENTRY_SIZE <= bytes.len() {
+                let entry = &bytes[offset..offset + ENTRY_SIZE];
+                let key_bytes = &entry[4..260];
+                let key_len = key_bytes.iter().position(|&b| b == 0).unwrap_or(256);
+                if let Ok(key) = std::str::from_utf8(&key_bytes[..key_len]) {
+                    let trimmed = key.trim();
+                    if !trimmed.is_empty() {
+                        let curr_uid =
+                            i32::from_le_bytes(entry[260..264].try_into().unwrap_or([0; 4]));
+                        let allow_su = entry[264] != 0;
+                        if allow_su {
+                            if curr_uid > 0 {
+                                root_uids.insert(curr_uid as u32);
                             }
+                            root_pkgs.insert(trimmed.to_string());
                         }
                     }
-                    offset += ENTRY_SIZE;
                 }
+                offset += ENTRY_SIZE;
             }
         }
     }
