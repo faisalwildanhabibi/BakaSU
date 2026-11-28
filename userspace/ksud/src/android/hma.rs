@@ -1482,7 +1482,9 @@ pub fn apply_all_user_apps_scope() -> Result<usize> {
 
     let (root_uids, root_pkgs) = get_root_granted_uids_and_packages();
     let vector_modules = get_active_vector_xposed_modules();
-    let (installed_packages, system_packages) = load_installed_packages();
+    let mut installed_packages: HashMap<String, u32> = HashMap::new();
+    let mut system_packages: HashSet<String> = HashSet::new();
+    load_installed_packages(&mut installed_packages, &mut system_packages);
 
     let mut all_hidden_pkgs = HashSet::new();
     all_hidden_pkgs.extend(root_pkgs);
