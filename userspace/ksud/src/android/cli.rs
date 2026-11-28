@@ -472,10 +472,7 @@ pub enum HmaSettingsTemplateCommand {
     /// Get a settings template as JSON
     Get { name: String },
     /// Create or update a settings template
-    Set {
-        name: String,
-        json: String,
-    },
+    Set { name: String, json: String },
     /// Delete a custom settings template
     Delete { name: String },
 }

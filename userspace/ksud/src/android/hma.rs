@@ -186,9 +186,8 @@ fn get_root_granted_uids_and_packages() -> (HashSet<u32>, HashSet<String>) {
                     if let Ok(key) = std::str::from_utf8(&key_bytes[..key_len]) {
                         let trimmed = key.trim();
                         if !trimmed.is_empty() {
-                            let curr_uid = i32::from_le_bytes(
-                                entry[260..264].try_into().unwrap_or([0; 4]),
-                            );
+                            let curr_uid =
+                                i32::from_le_bytes(entry[260..264].try_into().unwrap_or([0; 4]));
                             let allow_su = entry[264] != 0;
                             if allow_su {
                                 if curr_uid > 0 {
@@ -499,14 +498,20 @@ pub fn check_scope(package: &str) -> Result<String> {
 
     let settings_templates = cfg.get("settingsTemplates").and_then(Value::as_object);
     let mut applied_settings = serde_json::Map::new();
-    if let Some(arr) = app_cfg.get("applySettingsPresets").and_then(Value::as_array) {
+    if let Some(arr) = app_cfg
+        .get("applySettingsPresets")
+        .and_then(Value::as_array)
+    {
         for preset in arr.iter().filter_map(Value::as_str) {
             if let Some(st) = settings_templates.and_then(|m| m.get(preset)) {
                 applied_settings.insert(preset.to_string(), st.clone());
             }
         }
     }
-    if let Some(arr) = app_cfg.get("applySettingTemplates").and_then(Value::as_array) {
+    if let Some(arr) = app_cfg
+        .get("applySettingTemplates")
+        .and_then(Value::as_array)
+    {
         for tpl in arr.iter().filter_map(Value::as_str) {
             if let Some(st) = settings_templates.and_then(|m| m.get(tpl)) {
                 applied_settings.insert(tpl.to_string(), st.clone());
@@ -537,7 +542,10 @@ pub fn check_scope(package: &str) -> Result<String> {
 pub fn list_templates_json() -> Result<String> {
     let hma_dir = find_or_create_active_hma_dir()?;
     let cfg = read_or_init_config(&hma_dir);
-    let tpls = cfg.get("templates").cloned().unwrap_or(serde_json::json!({}));
+    let tpls = cfg
+        .get("templates")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
     Ok(serde_json::to_string_pretty(&tpls)?)
 }
 
@@ -626,7 +634,11 @@ pub fn set_settings_template(name: &str, json_str: &str) -> Result<()> {
         .with_context(|| format!("Invalid JSON for settings template {name}"))?;
     let hma_dir = find_or_create_active_hma_dir()?;
     let mut cfg = read_or_init_config(&hma_dir);
-    if cfg.get("settingsTemplates").and_then(Value::as_object).is_none() {
+    if cfg
+        .get("settingsTemplates")
+        .and_then(Value::as_object)
+        .is_none()
+    {
         cfg["settingsTemplates"] = serde_json::json!({});
     }
     cfg["settingsTemplates"][name] = val;
@@ -641,7 +653,10 @@ pub fn delete_settings_template(name: &str) -> Result<()> {
     }
     let hma_dir = find_or_create_active_hma_dir()?;
     let mut cfg = read_or_init_config(&hma_dir);
-    if let Some(sts) = cfg.get_mut("settingsTemplates").and_then(Value::as_object_mut) {
+    if let Some(sts) = cfg
+        .get_mut("settingsTemplates")
+        .and_then(Value::as_object_mut)
+    {
         sts.remove(name);
     }
     write_config(&hma_dir, &cfg)?;
@@ -1059,37 +1074,11 @@ pub fn sync_uid_scope() -> Result<usize> {
     let uid_scope_dir = hma_dir.join("uid_scope");
     ensure_dir_exists(&uid_scope_dir)?;
 
-    let root_granted_uids = get_root_granted_uids();
+    let (root_granted_uids, root_granted_pkgs) = get_root_granted_uids_and_packages();
 
     let mut all_packages: HashMap<String, u32> = HashMap::new();
     let mut system_packages: HashSet<String> = HashSet::new();
-
-    let packages_list_path = Path::new("/data/system/packages.list");
-    if let Ok(file) = File::open(packages_list_path) {
-        for line in BufReader::new(file).lines().map_while(Result::ok) {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 4 {
-                let pkg_name = parts[0];
-                if let Ok(uid) = parts[1].parse::<u32>() {
-                    all_packages.insert(pkg_name.to_string(), uid);
-                    let data_dir = parts[3];
-
-                    let is_user_range = (10000..=19999).contains(&uid)
-                        && (data_dir.starts_with("/data/user/")
-                            || data_dir.starts_with("/data/data/"));
-                    let seinfo = parts.get(4).copied().unwrap_or("");
-                    let installer = parts.last().copied().unwrap_or("");
-                    let is_system_pkg = !is_user_range
-                        || seinfo.contains(":partition=")
-                        || seinfo.contains(":privapp")
-                        || installer == "@system";
-                    if is_system_pkg {
-                        system_packages.insert(pkg_name.to_string());
-                    }
-                }
-            }
-        }
-    }
+    load_installed_packages(&mut all_packages, &mut system_packages);
 
     let mut config_obj = read_or_init_config(&hma_dir);
 
@@ -1270,6 +1259,7 @@ pub fn sync_uid_scope() -> Result<usize> {
             let uid = all_packages.get(pkg).copied().unwrap_or(0);
             if system_packages.contains(pkg)
                 || root_granted_uids.contains(&uid)
+                || root_granted_pkgs.contains(pkg)
                 || PRESET_HIDDEN_PACKAGES.contains(&pkg.as_str())
                 || LAUNCHER_AND_SYSTEM_UI_EXCLUDES.contains(&pkg.as_str())
             {
