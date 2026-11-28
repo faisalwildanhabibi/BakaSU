@@ -53,6 +53,9 @@ fun HmaAppScopeTab(
     val hiddenPkgSet = remember(config.templates) {
         config.templates.values.flatMap { it.appList }.toSet()
     }
+    val rootAppsSet = remember(config.templates) {
+        config.templates["root_apps"]?.appList?.toSet() ?: emptySet()
+    }
 
     val filteredApps = remember(
         installedPackages,
@@ -155,27 +158,37 @@ fun HmaAppScopeTab(
                     )
                 }
                 Spacer(Modifier.width(8.dp))
+                val isRootOrManager = rootAppsSet.contains(pkg.packageName) ||
+                    pkg.packageName == "org.bakasu.bakasu" ||
+                    pkg.packageName == "com.resukisu.resukisu"
+
                 Surface(
                     shape = MaterialTheme.shapes.small,
-                    color = if (appScope != null) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant
+                    color = when {
+                        isRootOrManager && appScope == null -> MaterialTheme.colorScheme.tertiaryContainer
+                        appScope != null -> MaterialTheme.colorScheme.primaryContainer
+                        else -> MaterialTheme.colorScheme.surfaceVariant
                     },
                 ) {
-                    val badgeText = if (appScope == null) {
-                        "Off"
-                    } else {
-                        val mode = if (appScope.useWhitelist) "Whitelist" else "Blacklist"
-                        "$mode • ${appScope.applyTemplates.size}T/${appScope.extraAppList.size}E"
+                    val badgeText = when {
+                        appScope != null -> {
+                            val mode = if (appScope.useWhitelist) "Whitelist" else "Blacklist"
+                            val totalRules = appScope.applyTemplates.size +
+                                appScope.applyPresets.size +
+                                appScope.applySettingsPresets.size +
+                                appScope.applySettingTemplates.size
+                            "$mode • ${totalRules}T/${appScope.extraAppList.size}E"
+                        }
+                        isRootOrManager -> "Root App (Hidden)"
+                        else -> "Off"
                     }
                     Text(
                         text = badgeText,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (appScope != null) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                        color = when {
+                            isRootOrManager && appScope == null -> MaterialTheme.colorScheme.onTertiaryContainer
+                            appScope != null -> MaterialTheme.colorScheme.onPrimaryContainer
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
@@ -189,6 +202,7 @@ fun HmaAppScopeTab(
             pkg = target,
             initialScope = config.scope[target.packageName],
             templates = config.templates,
+            settingsTemplates = config.settingsTemplates,
             installedPackages = installedPackages,
             onDismiss = { editingPkg = null },
             onSave = { enabled, updated ->

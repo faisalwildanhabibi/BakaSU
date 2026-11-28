@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.twotone.ListAlt
 import androidx.compose.material.icons.twotone.Add
-import androidx.compose.material.icons.twotone.ListAlt
 import androidx.compose.material.icons.twotone.Refresh
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,6 +68,7 @@ fun HmaTemplatesTab(
                     "custom_rom",
                     "shizuku_dhizuku",
                     "xposed",
+                    "accessibility_apps",
                     "accessibility",
                 )
             }
@@ -79,15 +80,15 @@ fun HmaTemplatesTab(
 
             if (presets.isNotEmpty()) {
                 SegmentedColumn(
-                    title = "Official Presets (${presets.size})",
+                    title = "Official App Presets (${presets.size})",
                     content = {
                         presets.forEach { preset ->
                             item {
                                 val mode = if (preset.isWhitelist) "Whitelist" else "Blacklist"
                                 val installedCount = preset.appList.count { it in installedSet }
                                 SettingsBaseWidget(
-                                    icon = Icons.TwoTone.ListAlt,
-                                    title = "Official Preset (${preset.name})",
+                                    icon = Icons.AutoMirrored.TwoTone.ListAlt,
+                                    title = "Preset (${preset.name})",
                                     description = "$mode • $installedCount installed / ${preset.appList.size} total • Auto-Synced",
                                     onClick = { editingTemplate = preset },
                                 )
@@ -98,12 +99,39 @@ fun HmaTemplatesTab(
             }
 
             SegmentedColumn(
+                title = "Official Settings Presets (3)",
+                content = {
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.AutoMirrored.TwoTone.ListAlt,
+                            title = "Aksesibilitas (accessibility)",
+                            description = "secure: accessibility_enabled=0, enabled_accessibility_services=\"\"",
+                        )
+                    }
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.AutoMirrored.TwoTone.ListAlt,
+                            title = "Alat Input (input_method)",
+                            description = "secure: default_input_method=LatinIME, tts_default_synth=Google TTS",
+                        )
+                    }
+                    item {
+                        SettingsBaseWidget(
+                            icon = Icons.AutoMirrored.TwoTone.ListAlt,
+                            title = "Opsi Pengembang (dev_options)",
+                            description = "global: adb_enabled=0, dev_settings=0 • secure: allow_mock_location=0",
+                        )
+                    }
+                },
+            )
+
+            SegmentedColumn(
                 title = "User Templates (${templates.size})",
                 content = {
                     if (templates.isEmpty()) {
                         item {
                             SettingsBaseWidget(
-                                icon = Icons.TwoTone.ListAlt,
+                                icon = Icons.AutoMirrored.TwoTone.ListAlt,
                                 title = "No User Templates",
                                 description = "Tap Create New Template above to add one",
                             )
@@ -114,7 +142,7 @@ fun HmaTemplatesTab(
                                 val mode = if (tpl.isWhitelist) "Whitelist" else "Blacklist"
                                 val installedCount = tpl.appList.count { it in installedSet }
                                 SettingsBaseWidget(
-                                    icon = Icons.TwoTone.ListAlt,
+                                    icon = Icons.AutoMirrored.TwoTone.ListAlt,
                                     title = tpl.name,
                                     description = "$mode • $installedCount installed / ${tpl.appList.size} total",
                                     onClick = { editingTemplate = tpl },

@@ -133,11 +133,77 @@ fn find_or_create_active_hma_dir() -> Result<PathBuf> {
     Ok(fallback)
 }
 
-fn get_root_granted_uids() -> HashSet<u32> {
+fn load_installed_packages(
+    all_packages: &mut HashMap<String, u32>,
+    system_packages: &mut HashSet<String>,
+) {
+    let packages_list_path = Path::new("/data/system/packages.list");
+    if let Ok(file) = File::open(packages_list_path) {
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 4 {
+                let pkg_name = parts[0];
+                if let Ok(uid) = parts[1].parse::<u32>() {
+                    all_packages.insert(pkg_name.to_string(), uid);
+                    let data_dir = parts[3];
+
+                    let is_user_range = (10000..=19999).contains(&uid)
+                        && (data_dir.starts_with("/data/user/")
+                            || data_dir.starts_with("/data/data/"));
+                    let seinfo = parts.get(4).copied().unwrap_or("");
+                    let installer = parts.last().copied().unwrap_or("");
+                    let is_system_pkg = !is_user_range
+                        || seinfo.contains(":partition=")
+                        || seinfo.contains(":privapp")
+                        || installer == "@system";
+                    if is_system_pkg {
+                        system_packages.insert(pkg_name.to_string());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn get_root_granted_uids_and_packages() -> (HashSet<u32>, HashSet<String>) {
     let mut root_uids = HashSet::new();
+    let mut root_pkgs = HashSet::new();
+
     if let Ok(allow_uids) = crate::android::ksucalls::get_allow_list() {
         root_uids.extend(allow_uids);
     }
+
+    if let Ok(bytes) = fs::read("/data/adb/ksu/.allowlist") {
+        if bytes.len() >= 8 {
+            let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap_or([0; 4]));
+            if magic == 0x4b53_5500 || magic == 0x7f4b_5355 {
+                let mut offset = 8;
+                const ENTRY_SIZE: usize = 784;
+                while offset + ENTRY_SIZE <= bytes.len() {
+                    let entry = &bytes[offset..offset + ENTRY_SIZE];
+                    let key_bytes = &entry[4..260];
+                    let key_len = key_bytes.iter().position(|&b| b == 0).unwrap_or(256);
+                    if let Ok(key) = std::str::from_utf8(&key_bytes[..key_len]) {
+                        let trimmed = key.trim();
+                        if !trimmed.is_empty() {
+                            let curr_uid = i32::from_le_bytes(
+                                entry[260..264].try_into().unwrap_or([0; 4]),
+                            );
+                            let allow_su = entry[264] != 0;
+                            if allow_su {
+                                if curr_uid > 0 {
+                                    root_uids.insert(curr_uid as u32);
+                                }
+                                root_pkgs.insert(trimmed.to_string());
+                            }
+                        }
+                    }
+                    offset += ENTRY_SIZE;
+                }
+            }
+        }
+    }
+
     let profile_dir = Path::new("/data/adb/ksu/profile");
     if let Ok(entries) = fs::read_dir(profile_dir) {
         for entry in entries.flatten() {
@@ -150,7 +216,12 @@ fn get_root_granted_uids() -> HashSet<u32> {
             }
         }
     }
-    root_uids
+
+    for &pkg in PRESET_HIDDEN_PACKAGES {
+        root_pkgs.insert(pkg.to_string());
+    }
+
+    (root_uids, root_pkgs)
 }
 
 pub fn status() -> HmaStatus {
@@ -161,7 +232,8 @@ pub fn status() -> HmaStatus {
     let mut uid_scope_ready = false;
     let mut scoped_apps_count = 0;
     let mut active_generation = String::new();
-    let root_granted_hidden_count = get_root_granted_uids().len();
+    let (root_uids, _) = get_root_granted_uids_and_packages();
+    let root_granted_hidden_count = root_uids.len();
 
     if let (Some(boot_id), Ok(hma_dir)) = (get_boot_id(), find_or_create_active_hma_dir()) {
         let active_file = hma_dir.join("uid_scope/active");
@@ -362,6 +434,217 @@ pub fn set_scope(package: &str, app_config_json: &str) -> Result<()> {
 
     write_config(&hma_dir, &cfg)?;
     let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+pub fn list_scopes_json() -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    let scope = cfg.get("scope").cloned().unwrap_or(serde_json::json!({}));
+    Ok(serde_json::to_string_pretty(&scope)?)
+}
+
+pub fn get_scope_json(package: &str) -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    if let Some(app_cfg) = cfg.get("scope").and_then(|s| s.get(package)) {
+        Ok(serde_json::to_string_pretty(app_cfg)?)
+    } else {
+        anyhow::bail!("Package {package} is not in HMA scope");
+    }
+}
+
+pub fn clear_scopes() -> Result<()> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let mut cfg = read_or_init_config(&hma_dir);
+    cfg["scope"] = serde_json::json!({});
+    write_config(&hma_dir, &cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(())
+}
+
+pub fn check_scope(package: &str) -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    let app_cfg = cfg
+        .get("scope")
+        .and_then(|s| s.get(package))
+        .with_context(|| format!("Package {package} is not in HMA scope"))?;
+
+    let mut all_packages: HashMap<String, u32> = HashMap::new();
+    let mut system_packages: HashSet<String> = HashSet::new();
+    load_installed_packages(&mut all_packages, &mut system_packages);
+
+    let target_uid = all_packages.get(package).copied().unwrap_or(0);
+    let templates = cfg.get("templates").and_then(Value::as_object);
+
+    let hidden_uids = resolve_hidden_uids_for_app(
+        package,
+        target_uid,
+        app_cfg,
+        templates,
+        &all_packages,
+        &system_packages,
+    );
+    let hidden_packages = resolve_hidden_packages_for_app(
+        package,
+        app_cfg,
+        templates,
+        &all_packages,
+        &system_packages,
+    );
+
+    let mut hidden_pkgs_vec: Vec<String> = hidden_packages.into_iter().collect();
+    hidden_pkgs_vec.sort();
+
+    let settings_templates = cfg.get("settingsTemplates").and_then(Value::as_object);
+    let mut applied_settings = serde_json::Map::new();
+    if let Some(arr) = app_cfg.get("applySettingsPresets").and_then(Value::as_array) {
+        for preset in arr.iter().filter_map(Value::as_str) {
+            if let Some(st) = settings_templates.and_then(|m| m.get(preset)) {
+                applied_settings.insert(preset.to_string(), st.clone());
+            }
+        }
+    }
+    if let Some(arr) = app_cfg.get("applySettingTemplates").and_then(Value::as_array) {
+        for tpl in arr.iter().filter_map(Value::as_str) {
+            if let Some(st) = settings_templates.and_then(|m| m.get(tpl)) {
+                applied_settings.insert(tpl.to_string(), st.clone());
+            }
+        }
+    }
+
+    let result = serde_json::json!({
+        "package": package,
+        "uid": target_uid,
+        "useWhitelist": app_cfg.get("useWhitelist").and_then(Value::as_bool).unwrap_or(false),
+        "excludeSystemApps": app_cfg.get("excludeSystemApps").and_then(Value::as_bool).unwrap_or(true),
+        "applyPresets": app_cfg.get("applyPresets").unwrap_or(&Value::Null),
+        "applyTemplates": app_cfg.get("applyTemplates").unwrap_or(&Value::Null),
+        "applySettingsPresets": app_cfg.get("applySettingsPresets").unwrap_or(&Value::Null),
+        "applySettingTemplates": app_cfg.get("applySettingTemplates").unwrap_or(&Value::Null),
+        "extraAppList": app_cfg.get("extraAppList").unwrap_or(&Value::Null),
+        "hidden_uids_count": hidden_uids.len(),
+        "hidden_uids": hidden_uids,
+        "hidden_packages_count": hidden_pkgs_vec.len(),
+        "hidden_packages": hidden_pkgs_vec,
+        "effective_settings_overrides": applied_settings,
+    });
+
+    Ok(serde_json::to_string_pretty(&result)?)
+}
+
+pub fn list_templates_json() -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    let tpls = cfg.get("templates").cloned().unwrap_or(serde_json::json!({}));
+    Ok(serde_json::to_string_pretty(&tpls)?)
+}
+
+pub fn get_template_json(name: &str) -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    if let Some(tpl) = cfg.get("templates").and_then(|t| t.get(name)) {
+        Ok(serde_json::to_string_pretty(tpl)?)
+    } else {
+        anyhow::bail!("Template {name} not found");
+    }
+}
+
+pub fn list_presets_json() -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    let app_presets = [
+        "root_apps",
+        "detector_apps",
+        "sus_apps",
+        "custom_rom",
+        "shizuku_dhizuku",
+        "xposed",
+        "accessibility_apps",
+    ];
+    let settings_presets = ["accessibility", "input_method", "dev_options"];
+
+    let mut result = serde_json::Map::new();
+    let mut ap_map = serde_json::Map::new();
+    if let Some(tpls) = cfg.get("templates").and_then(Value::as_object) {
+        for &name in &app_presets {
+            if let Some(val) = tpls.get(name) {
+                ap_map.insert(name.to_string(), val.clone());
+            }
+        }
+    }
+    result.insert("app_presets".to_string(), Value::Object(ap_map));
+
+    let mut sp_map = serde_json::Map::new();
+    if let Some(sts) = cfg.get("settingsTemplates").and_then(Value::as_object) {
+        for &name in &settings_presets {
+            if let Some(val) = sts.get(name) {
+                sp_map.insert(name.to_string(), val.clone());
+            }
+        }
+    }
+    result.insert("settings_presets".to_string(), Value::Object(sp_map));
+
+    Ok(serde_json::to_string_pretty(&Value::Object(result))?)
+}
+
+pub fn get_preset_json(name: &str) -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    if let Some(tpl) = cfg.get("templates").and_then(|t| t.get(name)) {
+        return Ok(serde_json::to_string_pretty(tpl)?);
+    }
+    if let Some(st) = cfg.get("settingsTemplates").and_then(|s| s.get(name)) {
+        return Ok(serde_json::to_string_pretty(st)?);
+    }
+    anyhow::bail!("Preset {name} not found");
+}
+
+pub fn list_settings_templates_json() -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    let sts = cfg
+        .get("settingsTemplates")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+    Ok(serde_json::to_string_pretty(&sts)?)
+}
+
+pub fn get_settings_template_json(name: &str) -> Result<String> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let cfg = read_or_init_config(&hma_dir);
+    if let Some(st) = cfg.get("settingsTemplates").and_then(|s| s.get(name)) {
+        Ok(serde_json::to_string_pretty(st)?)
+    } else {
+        anyhow::bail!("Settings template {name} not found");
+    }
+}
+
+pub fn set_settings_template(name: &str, json_str: &str) -> Result<()> {
+    let val: Value = serde_json::from_str(json_str)
+        .with_context(|| format!("Invalid JSON for settings template {name}"))?;
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let mut cfg = read_or_init_config(&hma_dir);
+    if cfg.get("settingsTemplates").and_then(Value::as_object).is_none() {
+        cfg["settingsTemplates"] = serde_json::json!({});
+    }
+    cfg["settingsTemplates"][name] = val;
+    write_config(&hma_dir, &cfg)?;
+    Ok(())
+}
+
+pub fn delete_settings_template(name: &str) -> Result<()> {
+    let default_presets = ["accessibility", "input_method", "dev_options"];
+    if default_presets.contains(&name) {
+        anyhow::bail!("Cannot delete built-in settings preset {name}");
+    }
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let mut cfg = read_or_init_config(&hma_dir);
+    if let Some(sts) = cfg.get_mut("settingsTemplates").and_then(Value::as_object_mut) {
+        sts.remove(name);
+    }
+    write_config(&hma_dir, &cfg)?;
     Ok(())
 }
 

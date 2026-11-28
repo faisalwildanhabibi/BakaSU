@@ -1128,6 +1128,9 @@ class KsuCliRepository(context: Context) {
         val excludeTargetInstallationSource: Boolean = false,
         val invertActivityLaunchProtection: Boolean = false,
         val applyTemplates: List<String> = emptyList(),
+        val applyPresets: List<String> = emptyList(),
+        val applySettingsPresets: List<String> = emptyList(),
+        val applySettingTemplates: List<String> = emptyList(),
         val extraAppList: List<String> = emptyList(),
     )
 
@@ -1187,6 +1190,27 @@ class KsuCliRepository(context: Context) {
                             tplArr.optString(i).takeIf { it.isNotEmpty() }?.let { applied.add(it) }
                         }
                     }
+                    val presets = mutableListOf<String>()
+                    val presetsArr = s.optJSONArray("applyPresets")
+                    if (presetsArr != null) {
+                        for (i in 0 until presetsArr.length()) {
+                            presetsArr.optString(i).takeIf { it.isNotEmpty() }?.let { presets.add(it) }
+                        }
+                    }
+                    val settingsPresets = mutableListOf<String>()
+                    val spArr = s.optJSONArray("applySettingsPresets")
+                    if (spArr != null) {
+                        for (i in 0 until spArr.length()) {
+                            spArr.optString(i).takeIf { it.isNotEmpty() }?.let { settingsPresets.add(it) }
+                        }
+                    }
+                    val settingTemplates = mutableListOf<String>()
+                    val stArr = s.optJSONArray("applySettingTemplates")
+                    if (stArr != null) {
+                        for (i in 0 until stArr.length()) {
+                            stArr.optString(i).takeIf { it.isNotEmpty() }?.let { settingTemplates.add(it) }
+                        }
+                    }
                     val extra = mutableListOf<String>()
                     val extraArr = s.optJSONArray("extraAppList")
                     if (extraArr != null) {
@@ -1203,6 +1227,9 @@ class KsuCliRepository(context: Context) {
                         excludeTargetInstallationSource = s.optBoolean("excludeTargetInstallationSource", false),
                         invertActivityLaunchProtection = s.optBoolean("invertActivityLaunchProtection", false),
                         applyTemplates = applied,
+                        applyPresets = presets,
+                        applySettingsPresets = settingsPresets,
+                        applySettingTemplates = settingTemplates,
                         extraAppList = extra,
                     )
                 }
@@ -1263,6 +1290,12 @@ class KsuCliRepository(context: Context) {
 
     fun deleteHmaTemplate(name: String): Boolean = execKsud("hma template delete ${shellQuote(name)}", true)
 
+    fun setHmaSettingsTemplate(name: String, json: String): Boolean =
+        execKsud("hma settings-template set ${shellQuote(name)} ${shellQuote(json)}", true)
+
+    fun deleteHmaSettingsTemplate(name: String): Boolean =
+        execKsud("hma settings-template delete ${shellQuote(name)}", true)
+
     fun setHmaAppScope(appScope: HmaAppScope): Boolean {
         val json = org.json.JSONObject().apply {
             put("useWhitelist", appScope.useWhitelist)
@@ -1272,6 +1305,9 @@ class KsuCliRepository(context: Context) {
             put("excludeTargetInstallationSource", appScope.excludeTargetInstallationSource)
             put("invertActivityLaunchProtection", appScope.invertActivityLaunchProtection)
             put("applyTemplates", org.json.JSONArray(appScope.applyTemplates))
+            put("applyPresets", org.json.JSONArray(appScope.applyPresets))
+            put("applySettingsPresets", org.json.JSONArray(appScope.applySettingsPresets))
+            put("applySettingTemplates", org.json.JSONArray(appScope.applySettingTemplates))
             put("extraAppList", org.json.JSONArray(appScope.extraAppList))
         }
         return execKsud("hma scope set ${shellQuote(appScope.packageName)} ${shellQuote(json.toString())}", true)

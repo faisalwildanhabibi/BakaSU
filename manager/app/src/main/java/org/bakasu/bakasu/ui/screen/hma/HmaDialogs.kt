@@ -304,6 +304,7 @@ fun HmaScopeEditorDialog(
     pkg: InstalledPackageInfo,
     initialScope: KsuCliRepository.HmaAppScope?,
     templates: Map<String, KsuCliRepository.HmaTemplate>,
+    settingsTemplates: Map<String, List<String>> = emptyMap(),
     installedPackages: List<InstalledPackageInfo>,
     onDismiss: () -> Unit,
     onSave: (enabled: Boolean, scope: KsuCliRepository.HmaAppScope) -> Unit,
@@ -315,6 +316,42 @@ fun HmaScopeEditorDialog(
     var hideSystemInstallationSource by remember { mutableStateOf(initialScope?.hideSystemInstallationSource ?: false) }
     var excludeTargetInstallationSource by remember { mutableStateOf(initialScope?.excludeTargetInstallationSource ?: false) }
     var invertActivityLaunchProtection by remember { mutableStateOf(initialScope?.invertActivityLaunchProtection ?: false) }
+
+    val officialAppPresets = remember {
+        listOf(
+            "root_apps" to "Root Apps (Magisk, KernelSU, APatch, AdGuard, Termux)",
+            "detector_apps" to "Root & Environment Detectors (Momo, Ruru, Native Detector)",
+            "sus_apps" to "Suspicious & Forensic Apps",
+            "custom_rom" to "Custom ROM Identifier Packages",
+            "shizuku_dhizuku" to "Shizuku & Dhizuku Services",
+            "xposed" to "Xposed & LSPosed Managers",
+            "accessibility_apps" to "Accessibility Service Applications",
+        )
+    }
+
+    val officialSettingsPresets = remember {
+        listOf(
+            "accessibility" to "Aksesibilitas (Hide accessibility status & active services)",
+            "input_method" to "Alat Input (Spoof default input method & TTS synth)",
+            "dev_options" to "Opsi Pengembang (Hide ADB, USB debugging, dev options)",
+        )
+    }
+
+    val appliedPresets = remember {
+        mutableStateListOf<String>().apply {
+            addAll(initialScope?.applyPresets ?: emptyList())
+        }
+    }
+    val appliedSettingsPresets = remember {
+        mutableStateListOf<String>().apply {
+            addAll(initialScope?.applySettingsPresets ?: emptyList())
+        }
+    }
+    val appliedSettingTemplates = remember {
+        mutableStateListOf<String>().apply {
+            addAll(initialScope?.applySettingTemplates ?: emptyList())
+        }
+    }
     val appliedTemplates = remember {
         mutableStateListOf<String>().apply {
             addAll(initialScope?.applyTemplates ?: emptyList())
@@ -391,19 +428,153 @@ fun HmaScopeEditorDialog(
 
                     HorizontalDivider()
                     Text(
-                        text = "Apply Templates",
+                        text = "App Presets (Built-in)",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                     )
-                    val matchingTemplates = templates.values.filter { it.isWhitelist == useWhitelist }
-                    if (matchingTemplates.isEmpty()) {
+                    officialAppPresets.forEach { (presetKey, presetLabel) ->
+                        val isSelected = appliedPresets.contains(presetKey)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (isSelected) {
+                                        appliedPresets.remove(presetKey)
+                                    } else {
+                                        appliedPresets.add(presetKey)
+                                    }
+                                }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        if (!appliedPresets.contains(presetKey)) appliedPresets.add(presetKey)
+                                    } else {
+                                        appliedPresets.remove(presetKey)
+                                    }
+                                },
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = presetKey,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = presetLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider()
+                    Text(
+                        text = "Settings Presets (Aksesibilitas, Input, Dev)",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    officialSettingsPresets.forEach { (spKey, spLabel) ->
+                        val isSelected = appliedSettingsPresets.contains(spKey)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (isSelected) {
+                                        appliedSettingsPresets.remove(spKey)
+                                    } else {
+                                        appliedSettingsPresets.add(spKey)
+                                    }
+                                }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        if (!appliedSettingsPresets.contains(spKey)) appliedSettingsPresets.add(spKey)
+                                    } else {
+                                        appliedSettingsPresets.remove(spKey)
+                                    }
+                                },
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = spKey,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = spLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+
+                    if (settingsTemplates.isNotEmpty()) {
+                        HorizontalDivider()
                         Text(
-                            text = "No ${if (useWhitelist) "whitelist" else "blacklist"} templates available",
+                            text = "Custom Setting Templates",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        settingsTemplates.forEach { (stName, stItems) ->
+                            val isSelected = appliedSettingTemplates.contains(stName)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (isSelected) {
+                                            appliedSettingTemplates.remove(stName)
+                                        } else {
+                                            appliedSettingTemplates.add(stName)
+                                        }
+                                    }
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = isSelected,
+                                    onCheckedChange = { checked ->
+                                        if (checked) {
+                                            if (!appliedSettingTemplates.contains(stName)) appliedSettingTemplates.add(stName)
+                                        } else {
+                                            appliedSettingTemplates.remove(stName)
+                                        }
+                                    },
+                                )
+                                Text(
+                                    text = "$stName (${stItems.size} rules)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider()
+                    Text(
+                        text = "User Templates",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    val userTemplates = templates.values.filter {
+                        it.isWhitelist == useWhitelist && it.name !in setOf(
+                            "root_apps", "detector_apps", "sus_apps", "custom_rom", "shizuku_dhizuku", "xposed", "accessibility_apps", "accessibility"
+                        )
+                    }
+                    if (userTemplates.isEmpty()) {
+                        Text(
+                            text = "No user ${if (useWhitelist) "whitelist" else "blacklist"} templates",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
-                        matchingTemplates.forEach { tpl ->
+                        userTemplates.forEach { tpl ->
                             val isSelected = appliedTemplates.contains(tpl.name)
                             Row(
                                 modifier = Modifier
@@ -490,6 +661,9 @@ fun HmaScopeEditorDialog(
                             excludeTargetInstallationSource = excludeTargetInstallationSource,
                             invertActivityLaunchProtection = invertActivityLaunchProtection,
                             applyTemplates = appliedTemplates.filter { templates[it]?.isWhitelist == useWhitelist },
+                            applyPresets = appliedPresets.toList(),
+                            applySettingsPresets = appliedSettingsPresets.toList(),
+                            applySettingTemplates = appliedSettingTemplates.toList(),
                             extraAppList = extraAppList,
                         ),
                     )

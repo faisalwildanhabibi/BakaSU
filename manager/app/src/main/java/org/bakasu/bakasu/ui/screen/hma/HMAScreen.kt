@@ -19,12 +19,12 @@ import androidx.compose.material.icons.twotone.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
@@ -114,12 +114,11 @@ fun HMAScreen(
     val tabs = listOf("Settings", "Scope", "Templates", "Paths")
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             Column(
                 modifier = Modifier.background(MaterialTheme.colorScheme.surface),
             ) {
-                LargeFlexibleTopAppBar(
+                TopAppBar(
                     title = { Text(stringResource(R.string.settings_hma_title)) },
                     navigationIcon = {
                         if (showBackButton) {
@@ -131,10 +130,8 @@ fun HMAScreen(
                             }
                         }
                     },
-                    scrollBehavior = scrollBehavior,
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface,
-                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                     ),
                 )
                 PrimaryTabRow(

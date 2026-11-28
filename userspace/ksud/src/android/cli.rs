@@ -381,6 +381,16 @@ pub enum HmaCommand {
         #[command(subcommand)]
         command: HmaPathsCommand,
     },
+    /// Inspect built-in official app presets and settings presets
+    Preset {
+        #[command(subcommand)]
+        command: HmaPresetCommand,
+    },
+    /// Manage HMA settings templates (Accessibility, Input Method, Dev Options, custom)
+    SettingsTemplate {
+        #[command(subcommand)]
+        command: HmaSettingsTemplateCommand,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -412,6 +422,10 @@ pub enum HmaConfigCommand {
 
 #[derive(clap::Subcommand, Debug)]
 pub enum HmaTemplateCommand {
+    /// List all templates and presets as JSON
+    List,
+    /// Get details of a template or preset as JSON
+    Get { name: String },
     /// Create or update a template
     Set {
         name: String,
@@ -426,6 +440,10 @@ pub enum HmaTemplateCommand {
 
 #[derive(clap::Subcommand, Debug)]
 pub enum HmaScopeCommand {
+    /// List all configured app scopes as JSON
+    List,
+    /// Get an app's scope config as JSON
+    Get { package: String },
     /// Set or update an app's scope config as JSON
     Set {
         package: String,
@@ -433,6 +451,33 @@ pub enum HmaScopeCommand {
     },
     /// Remove an app from scope and add to ignoredPackagesForPresets
     Remove { package: String },
+    /// Evaluate and debug effective hidden UIDs, packages, and settings for an app
+    Check { package: String },
+    /// Clear all apps from scope
+    Clear,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum HmaPresetCommand {
+    /// List all official app presets and settings presets with summary
+    List,
+    /// Get details of a built-in preset
+    Get { name: String },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum HmaSettingsTemplateCommand {
+    /// List all settings templates and settings presets
+    List,
+    /// Get a settings template as JSON
+    Get { name: String },
+    /// Create or update a settings template
+    Set {
+        name: String,
+        json: String,
+    },
+    /// Delete a custom settings template
+    Delete { name: String },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -1483,6 +1528,14 @@ pub fn run() -> Result<()> {
                 }
             },
             HmaCommand::Template { command } => match command {
+                HmaTemplateCommand::List => {
+                    println!("{}", crate::android::hma::list_templates_json()?);
+                    Ok(())
+                }
+                HmaTemplateCommand::Get { name } => {
+                    println!("{}", crate::android::hma::get_template_json(&name)?);
+                    Ok(())
+                }
                 HmaTemplateCommand::Set {
                     name,
                     whitelist,
@@ -1499,6 +1552,14 @@ pub fn run() -> Result<()> {
                 }
             },
             HmaCommand::Scope { command } => match command {
+                HmaScopeCommand::List => {
+                    println!("{}", crate::android::hma::list_scopes_json()?);
+                    Ok(())
+                }
+                HmaScopeCommand::Get { package } => {
+                    println!("{}", crate::android::hma::get_scope_json(&package)?);
+                    Ok(())
+                }
                 HmaScopeCommand::Set {
                     package,
                     config_json,
@@ -1509,6 +1570,48 @@ pub fn run() -> Result<()> {
                 }
                 HmaScopeCommand::Remove { package } => {
                     crate::android::hma::remove_scope(&package)?;
+                    println!("true");
+                    Ok(())
+                }
+                HmaScopeCommand::Check { package } => {
+                    println!("{}", crate::android::hma::check_scope(&package)?);
+                    Ok(())
+                }
+                HmaScopeCommand::Clear => {
+                    crate::android::hma::clear_scopes()?;
+                    println!("true");
+                    Ok(())
+                }
+            },
+            HmaCommand::Preset { command } => match command {
+                HmaPresetCommand::List => {
+                    println!("{}", crate::android::hma::list_presets_json()?);
+                    Ok(())
+                }
+                HmaPresetCommand::Get { name } => {
+                    println!("{}", crate::android::hma::get_preset_json(&name)?);
+                    Ok(())
+                }
+            },
+            HmaCommand::SettingsTemplate { command } => match command {
+                HmaSettingsTemplateCommand::List => {
+                    println!("{}", crate::android::hma::list_settings_templates_json()?);
+                    Ok(())
+                }
+                HmaSettingsTemplateCommand::Get { name } => {
+                    println!(
+                        "{}",
+                        crate::android::hma::get_settings_template_json(&name)?
+                    );
+                    Ok(())
+                }
+                HmaSettingsTemplateCommand::Set { name, json } => {
+                    crate::android::hma::set_settings_template(&name, &json)?;
+                    println!("true");
+                    Ok(())
+                }
+                HmaSettingsTemplateCommand::Delete { name } => {
+                    crate::android::hma::delete_settings_template(&name)?;
                     println!("true");
                     Ok(())
                 }
