@@ -46,18 +46,27 @@ pub const KNOWN_XPOSED_MODULES: &[&str] = &[
 
 fn get_active_vector_xposed_modules() -> HashSet<String> {
     let mut modules = HashSet::new();
-    let cli_path = "/data/adb/modules/zygisk_vector/cli";
-    if Path::new(cli_path).exists() {
-        if let Ok(output) = Command::new(cli_path).args(["modules", "ls", "--json"]).output() {
-            if output.status.success() {
-                if let Ok(val) = serde_json::from_slice::<Value>(&output.stdout) {
-                    if let Some(arr) = val.get("data").and_then(Value::as_array) {
-                        for item in arr {
-                            if let Some(pkg) = item.get("PACKAGE").and_then(Value::as_str) {
-                                modules.insert(pkg.to_string());
-                            }
-                        }
-                    }
+    let cli_path = Path::new("/data/adb/modules/zygisk_vector/cli");
+    if !cli_path.exists() {
+        return modules;
+    }
+
+    let Ok(output) = Command::new(cli_path)
+        .args(["modules", "ls", "--json"])
+        .output()
+    else {
+        return modules;
+    };
+
+    if !output.status.success() {
+        return modules;
+    }
+
+    if let Ok(val) = serde_json::from_slice::<Value>(&output.stdout) {
+        if let Some(arr) = val.get("data").and_then(Value::as_array) {
+            for item in arr {
+                if let Some(pkg) = item.get("PACKAGE").and_then(Value::as_str) {
+                    modules.insert(pkg.to_string());
                 }
             }
         }
