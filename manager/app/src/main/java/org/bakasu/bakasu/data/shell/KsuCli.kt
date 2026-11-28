@@ -1313,6 +1313,8 @@ class KsuCliRepository(context: Context) {
 
     fun removeHmaAppScope(packageName: String): Boolean = execKsud("hma scope remove ${shellQuote(packageName)}", true)
 
+    fun protectAllUserApps(): Boolean = execKsud("hma scope apply-all", true)
+
     data class HmaPathsConfig(
         val autoHideAppPaths: Boolean = true,
         val globalPaths: List<String> = emptyList(),

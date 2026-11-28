@@ -455,6 +455,8 @@ pub enum HmaScopeCommand {
     Check { package: String },
     /// Clear all apps from scope
     Clear,
+    /// Apply default protection presets to all regular user apps
+    ApplyAll,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -1577,6 +1579,11 @@ pub fn run() -> Result<()> {
                 HmaScopeCommand::Clear => {
                     crate::android::hma::clear_scopes()?;
                     println!("true");
+                    Ok(())
+                }
+                HmaScopeCommand::ApplyAll => {
+                    let count = crate::android::hma::apply_all_user_apps_scope()?;
+                    println!(r#"{{"status":"success","applied_count":{count}}}"#);
                     Ok(())
                 }
             },

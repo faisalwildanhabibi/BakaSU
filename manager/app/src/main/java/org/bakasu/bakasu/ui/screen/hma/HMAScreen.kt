@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -22,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -115,35 +117,39 @@ fun HMAScreen(
 
     Scaffold(
         topBar = {
-            Column(
-                modifier = Modifier.background(MaterialTheme.colorScheme.surface),
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                TopAppBar(
-                    title = { Text(stringResource(R.string.settings_hma_title)) },
-                    navigationIcon = {
-                        if (showBackButton) {
-                            IconButton(onClick = { navigator.pop() }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.TwoTone.ArrowBack,
-                                    contentDescription = null,
-                                )
+                Column {
+                    TopAppBar(
+                        title = { Text(stringResource(R.string.settings_hma_title)) },
+                        navigationIcon = {
+                            if (showBackButton) {
+                                IconButton(onClick = { navigator.pop() }) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.TwoTone.ArrowBack,
+                                        contentDescription = null,
+                                    )
+                                }
                             }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent,
+                        ),
+                    )
+                    PrimaryTabRow(
+                        selectedTabIndex = selectedTab,
+                        containerColor = Color.Transparent,
+                    ) {
+                        tabs.forEachIndexed { index, title ->
+                            Tab(
+                                selected = selectedTab == index,
+                                onClick = { selectedTab = index },
+                                text = { Text(title) },
+                            )
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    ),
-                )
-                PrimaryTabRow(
-                    selectedTabIndex = selectedTab,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ) {
-                    tabs.forEachIndexed { index, title ->
-                        Tab(
-                            selected = selectedTab == index,
-                            onClick = { selectedTab = index },
-                            text = { Text(title) },
-                        )
                     }
                 }
             }
@@ -213,6 +219,15 @@ fun HMAScreen(
                 config = hmaConfig,
                 installedPackages = installedPackages,
                 contentPadding = listPadding,
+                onProtectAll = {
+                    scope.launch(Dispatchers.IO) {
+                        val ok = ksuCli.protectAllUserApps()
+                        snackBarHost.showReplacingSnackbar(
+                            if (ok) "Protected all user apps with default presets" else "Failed to protect all apps",
+                        )
+                        refreshAll()
+                    }
+                },
                 onUpdateScope = { enabled, updatedScope ->
                     scope.launch(Dispatchers.IO) {
                         val ok = if (enabled) {

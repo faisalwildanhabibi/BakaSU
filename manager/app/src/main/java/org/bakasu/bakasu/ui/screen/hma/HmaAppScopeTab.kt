@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.twotone.Search
+import androidx.compose.material.icons.twotone.Security
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +45,7 @@ fun HmaAppScopeTab(
     config: KsuCliRepository.HmaConfig,
     installedPackages: List<InstalledPackageInfo>,
     contentPadding: PaddingValues,
+    onProtectAll: () -> Unit = {},
     onUpdateScope: (enabled: Boolean, scope: KsuCliRepository.HmaAppScope) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -55,6 +58,9 @@ fun HmaAppScopeTab(
     }
     val rootAppsSet = remember(config.templates) {
         config.templates["root_apps"]?.appList?.toSet() ?: emptySet()
+    }
+    val xposedSet = remember(config.templates) {
+        config.templates["xposed"]?.appList?.toSet() ?: emptySet()
     }
 
     val filteredApps = remember(
@@ -123,6 +129,17 @@ fun HmaAppScopeTab(
                         onClick = { onlyAffected = !onlyAffected },
                         label = { Text("Affected (${config.scope.size})") },
                     )
+                    AssistChip(
+                        onClick = onProtectAll,
+                        label = { Text("Protect All") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.TwoTone.Security,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                    )
                 }
             }
         }
@@ -158,15 +175,22 @@ fun HmaAppScopeTab(
                     )
                 }
                 Spacer(Modifier.width(8.dp))
-                val isRootOrManager = rootAppsSet.contains(pkg.packageName) ||
+                val isRootApp = rootAppsSet.contains(pkg.packageName) ||
                     pkg.packageName == "org.bakasu.bakasu" ||
                     pkg.packageName == "com.resukisu.resukisu"
+
+                val isXposedModule = xposedSet.contains(pkg.packageName) ||
+                    pkg.packageName == "com.fuck.iab" ||
+                    pkg.packageName == "io.github.lsposed.disableflagsecure" ||
+                    pkg.packageName == "org.lsposed.corepatch"
+
+                val isPresetHidden = hiddenPkgSet.contains(pkg.packageName)
 
                 Surface(
                     shape = MaterialTheme.shapes.small,
                     color = when {
-                        isRootOrManager && appScope == null -> MaterialTheme.colorScheme.tertiaryContainer
                         appScope != null -> MaterialTheme.colorScheme.primaryContainer
+                        isRootApp || isXposedModule || isPresetHidden -> MaterialTheme.colorScheme.tertiaryContainer
                         else -> MaterialTheme.colorScheme.surfaceVariant
                     },
                 ) {
@@ -180,7 +204,11 @@ fun HmaAppScopeTab(
                             "$mode • ${totalRules}T/${appScope.extraAppList.size}E"
                         }
 
-                        isRootOrManager -> "Root App (Hidden)"
+                        isRootApp -> "Root App (Hidden)"
+
+                        isXposedModule -> "Xposed Module (Hidden)"
+
+                        isPresetHidden -> "Preset (Hidden)"
 
                         else -> "Off"
                     }
@@ -188,8 +216,8 @@ fun HmaAppScopeTab(
                         text = badgeText,
                         style = MaterialTheme.typography.labelSmall,
                         color = when {
-                            isRootOrManager && appScope == null -> MaterialTheme.colorScheme.onTertiaryContainer
                             appScope != null -> MaterialTheme.colorScheme.onPrimaryContainer
+                            isRootApp || isXposedModule || isPresetHidden -> MaterialTheme.colorScheme.onTertiaryContainer
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),

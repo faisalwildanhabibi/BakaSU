@@ -29,7 +29,41 @@ pub const PRESET_HIDDEN_PACKAGES: &[&str] = &[
     "bin.mt.plus",
     "np.manager",
     "com.chiteroman.playintegrityfix",
+    "com.fuck.iab",
+    "io.github.lsposed.disableflagsecure",
+    "org.lsposed.corepatch",
 ];
+
+pub const KNOWN_XPOSED_MODULES: &[&str] = &[
+    "com.fuck.iab",
+    "io.github.lsposed.disableflagsecure",
+    "org.lsposed.corepatch",
+    "org.lsposed.manager",
+    "org.lsposed.lspd",
+    "de.robv.android.xposed.installer",
+    "com.tsng.hidemyapplist",
+];
+
+fn get_active_vector_xposed_modules() -> HashSet<String> {
+    let mut modules = HashSet::new();
+    let cli_path = "/data/adb/modules/zygisk_vector/cli";
+    if Path::new(cli_path).exists() {
+        if let Ok(output) = Command::new(cli_path).args(["modules", "ls", "--json"]).output() {
+            if output.status.success() {
+                if let Ok(val) = serde_json::from_slice::<Value>(&output.stdout) {
+                    if let Some(arr) = val.get("data").and_then(Value::as_array) {
+                        for item in arr {
+                            if let Some(pkg) = item.get("PACKAGE").and_then(Value::as_str) {
+                                modules.insert(pkg.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    modules
+}
 
 #[derive(Serialize, Debug, Clone)]
 pub struct HmaStatus {
@@ -1134,6 +1168,8 @@ pub fn sync_uid_scope() -> Result<usize> {
         "com.amaze.filemanager",
     ];
 
+    let vector_modules = get_active_vector_xposed_modules();
+
     for (pkg, uid) in &all_packages {
         if root_granted_uids.contains(uid) || PRESET_HIDDEN_PACKAGES.contains(&pkg.as_str()) {
             root_apps_list.push(pkg.clone());
@@ -1167,7 +1203,12 @@ pub fn sync_uid_scope() -> Result<usize> {
         if pkg == "com.rosan.dhizuku" || pkg.starts_with("moe.shizuku.") {
             shizuku_list.push(pkg.clone());
         }
-        if pkg == "org.frknkrc44.hma_oss" || pkg.contains("lsposed") || pkg.contains("xposed") {
+        if vector_modules.contains(pkg)
+            || KNOWN_XPOSED_MODULES.contains(&pkg.as_str())
+            || pkg == "org.frknkrc44.hma_oss"
+            || pkg.contains("lsposed")
+            || pkg.contains("xposed")
+        {
             xposed_list.push(pkg.clone());
         }
     }
@@ -1180,8 +1221,9 @@ pub fn sync_uid_scope() -> Result<usize> {
         &mut xposed_list,
     ] {
         list.sort();
+        list.dedup();
     }
-    for (preset_name, list) in [
+    for (preset_name, mut list) in [
         ("root_apps", root_apps_list),
         ("detector_apps", detector_apps_list),
         ("sus_apps", sus_apps_list),
@@ -1189,6 +1231,22 @@ pub fn sync_uid_scope() -> Result<usize> {
         ("shizuku_dhizuku", shizuku_list),
         ("xposed", xposed_list),
     ] {
+        if let Some(existing_apps) = config_obj
+            .get("templates")
+            .and_then(|t| t.get(preset_name))
+            .and_then(|p| p.get("appList"))
+            .and_then(Value::as_array)
+        {
+            for app in existing_apps {
+                if let Some(s) = app.as_str() {
+                    if !list.contains(&s.to_string()) {
+                        list.push(s.to_string());
+                    }
+                }
+            }
+            list.sort();
+            list.dedup();
+        }
         if !list.is_empty() {
             config_obj["templates"][preset_name] = serde_json::json!({
                 "isWhitelist": false,
@@ -1407,4 +1465,96 @@ pub fn sync_uid_scope() -> Result<usize> {
     );
 
     Ok(synced_count)
+}
+
+pub fn apply_all_user_apps_scope() -> Result<usize> {
+    let hma_dir = find_or_create_active_hma_dir()?;
+    let mut cfg = read_or_init_config(&hma_dir);
+
+    let (root_uids, root_pkgs) = get_root_granted_uids_and_packages();
+    let vector_modules = get_active_vector_xposed_modules();
+    let (installed_packages, system_packages) = load_installed_packages();
+
+    let mut all_hidden_pkgs = HashSet::new();
+    all_hidden_pkgs.extend(root_pkgs);
+    all_hidden_pkgs.extend(vector_modules);
+    for &pkg in PRESET_HIDDEN_PACKAGES {
+        all_hidden_pkgs.insert(pkg.to_string());
+    }
+    for &pkg in KNOWN_XPOSED_MODULES {
+        all_hidden_pkgs.insert(pkg.to_string());
+    }
+    if let Some(templates) = cfg.get("templates").and_then(Value::as_object) {
+        for tpl in templates.values() {
+            if let Some(apps) = tpl.get("appList").and_then(Value::as_array) {
+                for app in apps {
+                    if let Some(s) = app.as_str() {
+                        all_hidden_pkgs.insert(s.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if cfg.get("scope").and_then(Value::as_object).is_none() {
+        cfg["scope"] = serde_json::json!({});
+    }
+
+    let default_scope_obj = serde_json::json!({
+        "useWhitelist": false,
+        "excludeSystemApps": true,
+        "hideInstallationSource": false,
+        "hideSystemInstallationSource": false,
+        "excludeTargetInstallationSource": false,
+        "invertActivityLaunchProtection": false,
+        "excludeVoldIsolation": false,
+        "applyTemplates": [],
+        "applyPresets": [
+            "root_apps",
+            "detector_apps",
+            "sus_apps",
+            "custom_rom",
+            "shizuku_dhizuku",
+            "xposed",
+            "accessibility_apps"
+        ],
+        "applySettingsPresets": [
+            "accessibility",
+            "dev_options",
+            "input_method"
+        ],
+        "applySettingTemplates": [],
+        "extraAppList": [],
+        "extraOppositeAppList": [],
+        "restrictedZygotePermissions": [],
+        "extraSettings": { "settingsList": [] }
+    });
+
+    let mut applied_count = 0;
+    if let Some(scope_obj) = cfg.get_mut("scope").and_then(Value::as_object_mut) {
+        for (pkg, uid) in &installed_packages {
+            if system_packages.contains(pkg) {
+                continue;
+            }
+            if root_uids.contains(uid) || all_hidden_pkgs.contains(pkg) {
+                continue;
+            }
+            if pkg == "org.bakasu.bakasu" || pkg == "com.resukisu.resukisu" {
+                continue;
+            }
+            if pkg.starts_with("com.google.android.gms")
+                || pkg.starts_with("com.google.android.gsf")
+                || pkg.starts_with("com.android.")
+            {
+                continue;
+            }
+
+            scope_obj.insert(pkg.clone(), default_scope_obj.clone());
+            applied_count += 1;
+        }
+    }
+
+    write_config(&hma_dir, &cfg)?;
+    let _ = sync_uid_scope()?;
+    Ok(applied_count)
 }
